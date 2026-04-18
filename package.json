@@ -12,6 +12,7 @@
   "dependencies": {
     "@types/uuid": "^10.0.0",
     "@vercel/kv": "^3.0.0",
+    "bcryptjs": "^3.0.3",
     "date-fns": "^4.1.0",
     "jspdf": "^4.2.1",
     "jspdf-autotable": "^5.0.7",
@@ -27,6 +28,7 @@
   "devDependencies": {
     "@eslint/js": "^9.39.4",
     "@tailwindcss/postcss": "^4.2.2",
+    "@types/bcryptjs": "^2.4.6",
     "@types/node": "^24.12.2",
     "@types/react": "^19.2.14",
     "@types/react-dom": "^19.2.3",

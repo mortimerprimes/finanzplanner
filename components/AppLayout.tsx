@@ -7,7 +7,7 @@ import { signOut } from 'next-auth/react';
 import {
   LayoutDashboard, TrendingUp, Receipt, CreditCard, PiggyBank,
   Wallet, Landmark, RefreshCw, Settings, BarChart3, Menu, X,
-  ChevronLeft, ChevronRight, Sun, Moon, Monitor, Target, CalendarDays, LogOut
+  ChevronLeft, ChevronRight, Sun, Moon, Monitor, Target, CalendarDays, LogOut, UserCircle
 } from 'lucide-react';
 import { useTheme } from '@/src/hooks/useTheme';
 import { useFinance } from '@/lib/finance-context';
@@ -28,6 +28,7 @@ const navItems = [
   { href: '/freelance', label: 'Freelance', icon: CalendarDays },
   { href: '/analytics', label: 'Analysen', icon: BarChart3 },
   { href: '/settings', label: 'Einstellungen', icon: Settings },
+  { href: '/profile', label: 'Profil', icon: UserCircle },
 ];
 
 export function AppLayout({ children }: { children: React.ReactNode }) {
