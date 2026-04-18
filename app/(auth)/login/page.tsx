@@ -44,6 +44,8 @@ export default function LoginPage() {
         setError('Bitte warte kurz bevor du dich erneut registrierst');
       } else if (result.error.includes('max_users_reached')) {
         setError('Maximale Benutzeranzahl erreicht');
+      } else if (result.error.includes('account_locked')) {
+        setError('Dein Konto wurde gesperrt. Kontaktiere den Admin.');
       } else {
         setError('Ungültige Anmeldedaten');
       }

@@ -8,7 +8,7 @@ import {
   LayoutDashboard, TrendingUp, Receipt, CreditCard, PiggyBank,
   Wallet, Landmark, RefreshCw, Settings, BarChart3, Menu, X,
   ChevronLeft, ChevronRight, Sun, Moon, Monitor, Target, CalendarDays, LogOut, UserCircle,
-  CalendarRange, FileBarChart
+  CalendarRange, FileBarChart, Crown
 } from 'lucide-react';
 import { useTheme } from '@/src/hooks/useTheme';
 import { useFinance } from '@/lib/finance-context';
@@ -19,6 +19,7 @@ import { NotificationBell } from '@/components/NotificationBell';
 import { useNotificationEngine } from '@/src/hooks/useNotifications';
 import { GlobalSearch } from '@/src/components/GlobalSearch';
 import { useKeyboardShortcuts, KeyboardShortcutsHelp } from '@/src/hooks/useKeyboardShortcuts';
+import { useSession } from 'next-auth/react';
 
 const navItems = [
   { href: '/dashboard', label: 'Dashboard', icon: LayoutDashboard },
@@ -35,6 +36,7 @@ const navItems = [
   { href: '/analytics', label: 'Analysen', icon: BarChart3 },
   { href: '/annual-report', label: 'Jahresbericht', icon: FileBarChart },
   { href: '/settings', label: 'Einstellungen', icon: Settings },
+  { href: '/admin', label: 'Admin', icon: Crown, adminOnly: true },
   { href: '/profile', label: 'Profil', icon: UserCircle },
 ];
 
@@ -45,6 +47,11 @@ export function AppLayout({ children }: { children: React.ReactNode }) {
   const { theme, setTheme, resolvedTheme } = useTheme();
   const { state, dispatch } = useFinance();
   const pathname = usePathname();
+  const { data: session } = useSession();
+  const isAdmin = (session?.user as { role?: string } | undefined)?.role === 'admin';
+
+  // Filter nav items based on role
+  const visibleNavItems = navItems.filter(item => !(item as { adminOnly?: boolean }).adminOnly || isAdmin);
 
   // Run notification engine
   useNotificationEngine();
@@ -88,7 +95,7 @@ export function AppLayout({ children }: { children: React.ReactNode }) {
   const monthOptions = getMonthPickerRange(state.selectedMonth, 8, 7);
   const isSettingsPage = pathname === '/settings';
 
-  const currentNavItem = navItems.find(item => pathname === item.href);
+  const currentNavItem = visibleNavItems.find(item => pathname === item.href);
 
   const handleSelectMonth = (month: string) => {
     dispatch({ type: 'SET_SELECTED_MONTH', payload: month });
@@ -118,7 +125,7 @@ export function AppLayout({ children }: { children: React.ReactNode }) {
         </div>
 
         <nav className="flex-1 py-4 px-3 space-y-1 overflow-y-auto">
-          {navItems.map((item) => {
+          {visibleNavItems.map((item) => {
             const Icon = item.icon;
             const isActive = pathname === item.href;
             return (
@@ -188,7 +195,7 @@ export function AppLayout({ children }: { children: React.ReactNode }) {
           <div className="lg:hidden fixed inset-0 z-40 bg-black/40 animate-overlay" onClick={() => setMobileMenuOpen(false)} />
           <div className="lg:hidden fixed top-14 left-0 bottom-0 z-40 w-64 bg-white dark:bg-gray-900 border-r border-slate-200 dark:border-gray-800 animate-fade-in">
             <nav className="py-4 px-3 space-y-1">
-              {navItems.map((item) => {
+              {visibleNavItems.map((item) => {
                 const Icon = item.icon;
                 const isActive = pathname === item.href;
                 return (

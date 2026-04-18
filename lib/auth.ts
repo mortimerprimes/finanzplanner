@@ -89,6 +89,8 @@ export interface StoredUser {
   email: string;
   name: string;
   password: string; // bcrypt hash
+  role?: 'user' | 'admin';
+  isLocked?: boolean;
   createdAt: string;
 }
 
@@ -129,6 +131,11 @@ export const { handlers, signIn, signOut, auth } = NextAuth({
         const existingUser = await kv.get<StoredUser>(userKey);
 
         if (existingUser) {
+          // Check if account is locked
+          if (existingUser.isLocked) {
+            throw new Error('account_locked');
+          }
+
           // Check password with bcrypt
           // Support migration from plaintext: if hash doesn't start with $2, it's plaintext
           let valid = false;
@@ -149,6 +156,7 @@ export const { handlers, signIn, signOut, auth } = NextAuth({
               id: existingUser.id,
               email: existingUser.email,
               name: existingUser.name,
+              role: existingUser.role || 'user',
             };
           }
 
@@ -207,11 +215,18 @@ export const { handlers, signIn, signOut, auth } = NextAuth({
         token.id = user.id;
         token.email = user.email;
         token.name = user.name;
+        token.role = (user as { role?: string }).role || 'user';
+      }
+      // Env-based admin override
+      const adminEmails = (process.env.ADMIN_EMAILS || '').split(',').map(e => e.trim().toLowerCase()).filter(Boolean);
+      if (token.email && adminEmails.includes(token.email.toLowerCase())) {
+        token.role = 'admin';
       }
       // Allow updating session from client
       if (trigger === 'update' && session) {
         if (session.name) token.name = session.name;
         if (session.email) token.email = session.email;
+        if (session.role) token.role = session.role;
       }
       return token;
     },
@@ -220,6 +235,7 @@ export const { handlers, signIn, signOut, auth } = NextAuth({
         session.user.id = token.id as string;
         session.user.email = token.email as string;
         session.user.name = token.name as string;
+        (session.user as { role: string }).role = (token.role as string) || 'user';
       }
       return session;
     },

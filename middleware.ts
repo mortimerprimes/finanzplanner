@@ -23,6 +23,14 @@ export default auth((req) => {
     return NextResponse.redirect(new URL('/login', req.url));
   }
 
+  // Admin-only routes
+  if (pathname.startsWith('/admin')) {
+    const role = (req.auth?.user as { role?: string } | undefined)?.role;
+    if (role !== 'admin') {
+      return NextResponse.redirect(new URL('/dashboard', req.url));
+    }
+  }
+
   return NextResponse.next();
 });
 
