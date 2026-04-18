@@ -4,6 +4,7 @@ import { Area, AreaChart, Bar, BarChart, CartesianGrid, Cell, Pie, PieChart, Res
 import { useFinance } from '@/lib/finance-context';
 import { useTheme } from '../hooks/useTheme';
 import { Card, EmptyState, Icon, ProgressBar } from '../components/ui';
+import { NetWorthHistory } from './NetWorthHistory';
 import {
   calculateDebtPayoffMonths,
   calculateMonthSummary,
@@ -529,6 +530,9 @@ export function AnalyticsPage() {
           ))}
         </div>
       </Card>
+
+      {/* Net Worth History */}
+      <NetWorthHistory />
     </div>
   );
 }

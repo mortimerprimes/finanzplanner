@@ -18,6 +18,8 @@ import type {
   FreelanceInvoice,
   InvoiceProfile,
   LocalFolderSettings,
+  NetWorthSnapshot,
+  AppNotification,
 } from '../types';
 import { DEFAULT_SETTINGS } from '../utils/constants';
 import { generateId, getCurrentMonth, saveToLocalStorage, loadFromLocalStorage } from '../utils/helpers';
@@ -97,6 +99,8 @@ const initialState: FinanceState = {
     defaultVatRate: 20,
     note: '',
   },
+  netWorthHistory: [],
+  notifications: [],
   settings: DEFAULT_SETTINGS,
   selectedMonth: getCurrentMonth(),
   currentMonth: getCurrentMonth(),
@@ -201,6 +205,13 @@ type Action =
   | { type: 'UPDATE_FREELANCE_INVOICE'; payload: FreelanceInvoice }
   | { type: 'DELETE_FREELANCE_INVOICE'; payload: string }
   | { type: 'UPDATE_INVOICE_PROFILE'; payload: Partial<InvoiceProfile> }
+  // Net worth history
+  | { type: 'ADD_NET_WORTH_SNAPSHOT'; payload: NetWorthSnapshot }
+  // Notifications
+  | { type: 'ADD_NOTIFICATION'; payload: Omit<AppNotification, 'id' | 'createdAt'> }
+  | { type: 'MARK_NOTIFICATION_READ'; payload: string }
+  | { type: 'DISMISS_NOTIFICATION'; payload: string }
+  | { type: 'CLEAR_ALL_NOTIFICATIONS' }
   // Data management
   | { type: 'IMPORT_DATA'; payload: Partial<FinanceState> }
   | { type: 'RESET_DATA' }
@@ -544,6 +555,34 @@ function financeReducer(state: FinanceState, action: Action): FinanceState {
           ...action.payload,
         },
       };
+
+    // Net worth history
+    case 'ADD_NET_WORTH_SNAPSHOT': {
+      const existing = state.netWorthHistory.findIndex(s => s.month === action.payload.month);
+      const history = existing >= 0
+        ? state.netWorthHistory.map((s, i) => i === existing ? action.payload : s)
+        : [...state.netWorthHistory, action.payload];
+      return { ...state, netWorthHistory: history.sort((a, b) => a.month.localeCompare(b.month)).slice(-36) };
+    }
+
+    // Notifications
+    case 'ADD_NOTIFICATION':
+      return {
+        ...state,
+        notifications: [{ ...action.payload, id: generateId(), createdAt: now }, ...state.notifications].slice(0, 50),
+      };
+    case 'MARK_NOTIFICATION_READ':
+      return {
+        ...state,
+        notifications: state.notifications.map(n => n.id === action.payload ? { ...n, read: true } : n),
+      };
+    case 'DISMISS_NOTIFICATION':
+      return {
+        ...state,
+        notifications: state.notifications.filter(n => n.id !== action.payload),
+      };
+    case 'CLEAR_ALL_NOTIFICATIONS':
+      return { ...state, notifications: [] };
 
     // Data Management
     case 'IMPORT_DATA':

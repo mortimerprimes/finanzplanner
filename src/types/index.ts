@@ -346,9 +346,35 @@ export interface FinanceState {
   workSessions: WorkSession[];
   freelanceInvoices: FreelanceInvoice[];
   invoiceProfile: InvoiceProfile;
+  netWorthHistory: NetWorthSnapshot[];
+  notifications: AppNotification[];
   settings: Settings;
   selectedMonth: string;
   currentMonth: string;
+}
+
+// Nettovermögens-Historie
+export interface NetWorthSnapshot {
+  month: string; // "2026-04"
+  netWorth: number;
+  totalAssets: number;
+  totalDebts: number;
+  recordedAt: string;
+}
+
+// In-App Benachrichtigungen
+export type NotificationType = 'budget-warning' | 'bill-reminder' | 'savings-milestone' | 'debt-info' | 'general';
+
+export interface AppNotification {
+  id: string;
+  type: NotificationType;
+  title: string;
+  message: string;
+  icon?: string;
+  color?: string;
+  read: boolean;
+  createdAt: string;
+  expiresAt?: string;
 }
 
 // Category Info für UI

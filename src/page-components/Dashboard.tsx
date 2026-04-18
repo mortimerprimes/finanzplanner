@@ -1,4 +1,5 @@
 import { ReactNode, useState } from 'react';
+import { ArrowDownRight, ArrowUpRight } from 'lucide-react';
 import { Pie, PieChart, Cell, ResponsiveContainer, Tooltip } from 'recharts';
 import { useFinance } from '@/lib/finance-context';
 import { useTheme } from '../hooks/useTheme';
@@ -12,6 +13,8 @@ import {
   getExpenseCategoryInfo,
   getExpenseCategoryMap,
   getProgressColor,
+  shiftMonth,
+  getShortMonthName,
 } from '../utils/helpers';
 import type { Expense, ExpenseCategory } from '../types';
 
@@ -85,6 +88,8 @@ export function Dashboard() {
     { id: 'recent-expenses', label: 'Letzte Ausgaben' },
     { id: 'savings', label: 'Sparziele' },
     { id: 'quick-stats', label: 'Kennzahlen' },
+    { id: 'month-comparison', label: 'Monatsvergleich' },
+    { id: 'forecast', label: 'Prognose' },
   ];
 
   const budgetRisks = budgetCategoryCards
@@ -302,6 +307,120 @@ export function Dashboard() {
         ))}
       </div>
     ),
+    'month-comparison': (() => {
+      const prevMonth = shiftMonth(selectedMonth, -1);
+      const prevSummary = calculateMonthSummary(prevMonth, incomes, fixedExpenses, debts, expenses);
+      const curTotal = summary.totalFixedExpenses + summary.totalDebtPayments + summary.totalVariableExpenses;
+      const prevTotal = prevSummary.totalFixedExpenses + prevSummary.totalDebtPayments + prevSummary.totalVariableExpenses;
+      const changePct = prevTotal > 0 ? ((curTotal - prevTotal) / prevTotal) * 100 : 0;
+      const less = curTotal < prevTotal;
+
+      const categoryMap = getExpenseCategoryMap(settings);
+      const allCats = new Set([...Object.keys(summary.expensesByCategory), ...Object.keys(prevSummary.expensesByCategory)]);
+      const catComparison = Array.from(allCats)
+        .map(cat => ({
+          cat,
+          cur: summary.expensesByCategory[cat] || 0,
+          prev: prevSummary.expensesByCategory[cat] || 0,
+          diff: (summary.expensesByCategory[cat] || 0) - (prevSummary.expensesByCategory[cat] || 0),
+        }))
+        .filter(c => c.cur > 0 || c.prev > 0)
+        .sort((a, b) => Math.abs(b.diff) - Math.abs(a.diff))
+        .slice(0, 6);
+
+      return (
+        <Card className="p-5">
+          <h3 className="mb-4 text-base font-semibold text-gray-900 dark:text-white">Monatsvergleich</h3>
+          <div className="mb-4 flex flex-wrap items-center gap-3">
+            <div className={`inline-flex items-center gap-2 rounded-xl px-3 py-2 text-sm font-semibold ${
+              less
+                ? 'bg-emerald-50 text-emerald-700 dark:bg-emerald-950/30 dark:text-emerald-400'
+                : 'bg-red-50 text-red-700 dark:bg-red-950/30 dark:text-red-400'
+            }`}>
+              {less ? <ArrowDownRight size={16} /> : <ArrowUpRight size={16} />}
+              {Math.abs(changePct).toFixed(1)}% {less ? 'weniger' : 'mehr'} als {getShortMonthName(prevMonth)}
+            </div>
+            <div className="text-sm text-slate-500 dark:text-gray-500">
+              {formatCurrency(curTotal, settings)} vs. {formatCurrency(prevTotal, settings)}
+            </div>
+          </div>
+          {catComparison.length > 0 && (
+            <div className="space-y-2">
+              {catComparison.map(c => {
+                const info = categoryMap[c.cat] || { labelDe: c.cat, color: '#94a3b8', icon: 'Circle' };
+                const isLess = c.diff < 0;
+                return (
+                  <div key={c.cat} className="flex items-center justify-between rounded-xl bg-slate-50 px-3 py-2 dark:bg-gray-800/50">
+                    <div className="flex items-center gap-2">
+                      <Icon name={info.icon} size={14} color={info.color} />
+                      <span className="text-xs font-medium text-gray-700 dark:text-gray-300">{info.labelDe}</span>
+                    </div>
+                    <div className="flex items-center gap-2">
+                      <span className="text-xs text-slate-500 dark:text-gray-500">{formatCurrency(c.cur, settings)}</span>
+                      <span className={`text-xs font-semibold ${isLess ? 'text-emerald-600 dark:text-emerald-400' : 'text-red-600 dark:text-red-400'}`}>
+                        {isLess ? '' : '+'}{formatCurrency(c.diff, settings)}
+                      </span>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          )}
+        </Card>
+      );
+    })(),
+    forecast: (() => {
+      const today = new Date();
+      const dayOfMonth = today.getDate();
+      const daysInMonth = new Date(today.getFullYear(), today.getMonth() + 1, 0).getDate();
+      const daysRemaining = daysInMonth - dayOfMonth;
+      const monthExpenses = expenses.filter(e => e.month === selectedMonth);
+      const spentSoFar = monthExpenses.reduce((sum, e) => sum + e.amount, 0);
+      const dailyRate = dayOfMonth > 0 ? spentSoFar / dayOfMonth : 0;
+      const projectedTotal = spentSoFar + dailyRate * daysRemaining;
+      const projectedRemaining = summary.totalIncome - summary.totalFixedExpenses - summary.totalDebtPayments - projectedTotal;
+      const savingsRate = summary.totalIncome > 0 ? (projectedRemaining / summary.totalIncome) * 100 : 0;
+
+      return (
+        <Card className="p-5">
+          <h3 className="mb-4 text-base font-semibold text-gray-900 dark:text-white">Monatsend-Prognose</h3>
+          <div className="mb-4 rounded-2xl border border-slate-200 bg-slate-50 p-4 dark:border-gray-800 dark:bg-gray-800/30">
+            <p className="text-sm text-slate-600 dark:text-gray-400">
+              Bei aktuellem Tempo ({formatCurrency(dailyRate, settings)}/Tag) wirst du Ende Monat
+            </p>
+            <p className={`mt-2 text-2xl font-bold ${projectedRemaining >= 0 ? 'text-emerald-600 dark:text-emerald-400' : 'text-red-600 dark:text-red-400'}`}>
+              {formatCurrency(projectedRemaining, settings)}
+            </p>
+            <p className="mt-1 text-xs text-slate-500 dark:text-gray-500">übrig haben (Sparquote: {savingsRate.toFixed(1)}%)</p>
+          </div>
+          <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
+            {[
+              { label: 'Bisher ausgegeben', value: formatCurrency(spentSoFar, settings), tone: 'text-gray-900 dark:text-white' },
+              { label: 'Täglicher Schnitt', value: formatCurrency(dailyRate, settings), tone: 'text-blue-600 dark:text-blue-400' },
+              { label: 'Hochrechnung', value: formatCurrency(projectedTotal, settings), tone: 'text-amber-600 dark:text-amber-400' },
+              { label: 'Verbleibende Tage', value: String(daysRemaining), tone: 'text-gray-900 dark:text-white' },
+            ].map(item => (
+              <div key={item.label} className="rounded-xl bg-slate-50 p-3 dark:bg-gray-800/50">
+                <p className="text-[10px] font-medium text-slate-500 dark:text-gray-500">{item.label}</p>
+                <p className={`mt-1 text-sm font-bold ${item.tone}`}>{item.value}</p>
+              </div>
+            ))}
+          </div>
+          <div className="mt-4">
+            <div className="flex items-center justify-between text-xs text-slate-500 dark:text-gray-500">
+              <span>Ausgabentempo</span>
+              <span>Tag {dayOfMonth} / {daysInMonth}</span>
+            </div>
+            <div className="mt-1.5 h-2 w-full overflow-hidden rounded-full bg-slate-200 dark:bg-gray-800">
+              <div
+                className={`h-full rounded-full transition-all ${projectedRemaining >= 0 ? 'bg-emerald-500' : 'bg-red-500'}`}
+                style={{ width: `${Math.min(100, (dayOfMonth / daysInMonth) * 100)}%` }}
+              />
+            </div>
+          </div>
+        </Card>
+      );
+    })(),
   };
 
   const activeWidgets = settings.dashboardWidgets.filter((widgetId) => widgetSections[widgetId]);

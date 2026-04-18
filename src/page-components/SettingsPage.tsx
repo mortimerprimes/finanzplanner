@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import { Bot, Check, Download, Eye, EyeOff, LoaderCircle, Mic, ReceiptText, RotateCcw, ShieldCheck, Upload } from 'lucide-react';
+import { Bot, Check, Download, Eye, EyeOff, LoaderCircle, Mic, PlugZap, ReceiptText, RotateCcw, ShieldCheck, Upload } from 'lucide-react';
 import * as XLSX from 'xlsx';
 import jsPDF from 'jspdf';
 import autoTable from 'jspdf-autotable';
@@ -430,7 +430,7 @@ export function SettingsPage() {
     updateSetting('customExpenseCategories', settings.customExpenseCategories.filter((item) => item.id !== id));
   };
 
-  const providerLabel = STORAGE_LABELS[settings.backupProvider];
+  const providerLabel = 'Vercel KV';
 
   return (
     <div className="max-w-6xl space-y-6 animate-fade-in">

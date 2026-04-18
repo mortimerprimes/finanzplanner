@@ -7,13 +7,16 @@ import { signOut } from 'next-auth/react';
 import {
   LayoutDashboard, TrendingUp, Receipt, CreditCard, PiggyBank,
   Wallet, Landmark, RefreshCw, Settings, BarChart3, Menu, X,
-  ChevronLeft, ChevronRight, Sun, Moon, Monitor, Target, CalendarDays, LogOut, UserCircle
+  ChevronLeft, ChevronRight, Sun, Moon, Monitor, Target, CalendarDays, LogOut, UserCircle,
+  CalendarRange, FileBarChart
 } from 'lucide-react';
 import { useTheme } from '@/src/hooks/useTheme';
 import { useFinance } from '@/lib/finance-context';
 import { getMonthDisplayName, getMonthPickerRange, shiftMonth } from '@/src/utils/helpers';
 import { Modal } from '@/src/components/ui';
 import { QuickCaptureFab } from '@/src/components/QuickCaptureFab';
+import { NotificationBell } from '@/components/NotificationBell';
+import { useNotificationEngine } from '@/src/hooks/useNotifications';
 
 const navItems = [
   { href: '/dashboard', label: 'Dashboard', icon: LayoutDashboard },
@@ -26,7 +29,9 @@ const navItems = [
   { href: '/accounts', label: 'Konten', icon: Landmark },
   { href: '/bank-sync', label: 'Bank Sync', icon: RefreshCw },
   { href: '/freelance', label: 'Freelance', icon: CalendarDays },
+  { href: '/cashflow', label: 'Cashflow', icon: CalendarRange },
   { href: '/analytics', label: 'Analysen', icon: BarChart3 },
+  { href: '/annual-report', label: 'Jahresbericht', icon: FileBarChart },
   { href: '/settings', label: 'Einstellungen', icon: Settings },
   { href: '/profile', label: 'Profil', icon: UserCircle },
 ];
@@ -38,6 +43,9 @@ export function AppLayout({ children }: { children: React.ReactNode }) {
   const { theme, setTheme, resolvedTheme } = useTheme();
   const { state, dispatch } = useFinance();
   const pathname = usePathname();
+
+  // Run notification engine
+  useNotificationEngine();
 
   const handlePrevMonth = () => {
     const [year, month] = state.selectedMonth.split('-').map(Number);
@@ -151,12 +159,15 @@ export function AppLayout({ children }: { children: React.ReactNode }) {
           {mobileMenuOpen ? <X size={22} /> : <Menu size={22} />}
         </button>
         <h1 className="text-base font-bold text-gray-900 dark:text-white">💰 Finanzplanner</h1>
-        <button
-          onClick={cycleTheme}
-          className="p-2 rounded-lg hover:bg-slate-100 dark:hover:bg-gray-800 text-slate-500 dark:text-gray-400"
-        >
+        <div className="flex items-center gap-1">
+          <NotificationBell />
+          <button
+            onClick={cycleTheme}
+            className="p-2 rounded-lg hover:bg-slate-100 dark:hover:bg-gray-800 text-slate-500 dark:text-gray-400"
+          >
           <ThemeIcon size={20} />
         </button>
+        </div>
       </div>
 
       {/* MOBILE MENU OVERLAY */}
@@ -218,6 +229,9 @@ export function AppLayout({ children }: { children: React.ReactNode }) {
               </button>
             </div>
           )}
+          <div className={`${isSettingsPage ? 'ml-auto' : ''} flex-shrink-0 hidden lg:block`}>
+            <NotificationBell />
+          </div>
         </header>
 
         <main className="flex-1 overflow-y-auto overflow-x-hidden p-4 md:p-5 lg:p-6">

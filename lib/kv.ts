@@ -1,5 +1,5 @@
 import { kv } from '@vercel/kv';
-import type { FinanceState } from '@/src/types';
+import type { FinanceState, Income, FixedExpense, Expense, Debt, SavingsGoal, BudgetLimit, Account, Transfer, BankConnection, SyncSession, FreelanceProject, WorkSession, FreelanceInvoice, NetWorthSnapshot, AppNotification } from '@/src/types';
 import { DEFAULT_SETTINGS } from '@/src/utils/constants';
 import { getCurrentMonth } from '@/src/utils/helpers';
 
@@ -81,23 +81,27 @@ export async function getFullState(userId: string): Promise<FinanceState> {
     invoiceProfile,
     settings,
     selectedMonth,
+    netWorthHistory,
+    notifications,
   ] = await Promise.all([
-    getEntities(userId, 'incomes'),
-    getEntities(userId, 'fixedExpenses'),
-    getEntities(userId, 'expenses'),
-    getEntities(userId, 'debts'),
-    getEntities(userId, 'savingsGoals'),
-    getEntities(userId, 'budgetLimits'),
-    getEntities(userId, 'accounts'),
-    getEntities(userId, 'transfers'),
-    getEntities(userId, 'bankConnections'),
-    getEntities(userId, 'syncSessions'),
-    getEntities(userId, 'freelanceProjects'),
-    getEntities(userId, 'workSessions'),
-    getEntities(userId, 'freelanceInvoices'),
+    getEntities<Income>(userId, 'incomes'),
+    getEntities<FixedExpense>(userId, 'fixedExpenses'),
+    getEntities<Expense>(userId, 'expenses'),
+    getEntities<Debt>(userId, 'debts'),
+    getEntities<SavingsGoal>(userId, 'savingsGoals'),
+    getEntities<BudgetLimit>(userId, 'budgetLimits'),
+    getEntities<Account>(userId, 'accounts'),
+    getEntities<Transfer>(userId, 'transfers'),
+    getEntities<BankConnection>(userId, 'bankConnections'),
+    getEntities<SyncSession>(userId, 'syncSessions'),
+    getEntities<FreelanceProject>(userId, 'freelanceProjects'),
+    getEntities<WorkSession>(userId, 'workSessions'),
+    getEntities<FreelanceInvoice>(userId, 'freelanceInvoices'),
     getObject(userId, 'invoiceProfile', defaultInvoiceProfile),
     getObject(userId, 'settings', DEFAULT_SETTINGS),
     kv.get<string>(userKey(userId, 'selectedMonth')),
+    kv.get<NetWorthSnapshot[]>(userKey(userId, 'netWorthHistory')),
+    kv.get<AppNotification[]>(userKey(userId, 'notifications')),
   ]);
 
   const month = selectedMonth || getCurrentMonth();
@@ -117,10 +121,12 @@ export async function getFullState(userId: string): Promise<FinanceState> {
     workSessions,
     freelanceInvoices,
     invoiceProfile,
-    settings: { ...DEFAULT_SETTINGS, ...settings },
+    settings: { ...DEFAULT_SETTINGS, ...settings } as any,
     selectedMonth: month,
     currentMonth: month,
-  } as FinanceState;
+    netWorthHistory: netWorthHistory || [],
+    notifications: notifications || [],
+  };
 }
 
 export async function saveFullState(userId: string, state: FinanceState): Promise<void> {
@@ -141,5 +147,7 @@ export async function saveFullState(userId: string, state: FinanceState): Promis
     setObject(userId, 'invoiceProfile', state.invoiceProfile),
     setObject(userId, 'settings', state.settings),
     kv.set(userKey(userId, 'selectedMonth'), state.selectedMonth),
+    kv.set(userKey(userId, 'netWorthHistory'), state.netWorthHistory),
+    kv.set(userKey(userId, 'notifications'), state.notifications),
   ]);
 }
