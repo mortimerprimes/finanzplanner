@@ -5,6 +5,11 @@ export default auth((req) => {
   const isLoggedIn = !!req.auth;
   const { pathname } = req.nextUrl;
 
+  // API routes handle their own auth (return 401)
+  if (pathname.startsWith('/api/')) {
+    return NextResponse.next();
+  }
+
   // Public routes
   if (pathname.startsWith('/login') || pathname.startsWith('/api/auth')) {
     if (isLoggedIn && pathname.startsWith('/login')) {
