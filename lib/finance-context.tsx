@@ -344,12 +344,19 @@ export function FinanceProvider({ children }: { children: ReactNode }) {
         const res = await fetch('/api/finance');
         if (res.ok) {
           const data = await res.json();
-          // Only dispatch if we got actual data (not empty default)
-          if (data && (data.incomes?.length || data.expenses?.length || data.settings)) {
+          if (data && !data.error) {
             dispatch({ type: 'SET_STATE', payload: data });
           }
+        } else {
+          console.warn('[Finance] API load failed:', res.status);
+          // Fallback: try localStorage
+          const saved = localStorage.getItem(STORAGE_KEY);
+          if (saved) {
+            dispatch({ type: 'SET_STATE', payload: JSON.parse(saved) });
+          }
         }
-      } catch {
+      } catch (err) {
+        console.warn('[Finance] API load error:', err);
         // Fallback: try localStorage
         try {
           const saved = localStorage.getItem(STORAGE_KEY);
@@ -382,14 +389,19 @@ export function FinanceProvider({ children }: { children: ReactNode }) {
     if (syncTimeoutRef.current) {
       clearTimeout(syncTimeoutRef.current);
     }
-    syncTimeoutRef.current = setTimeout(() => {
-      fetch('/api/finance', {
-        method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(state),
-      }).catch(() => {
-        // Silently fail - localStorage is the fallback
-      });
+    syncTimeoutRef.current = setTimeout(async () => {
+      try {
+        const res = await fetch('/api/finance', {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(state),
+        });
+        if (!res.ok) {
+          console.error('[Finance] Save failed:', res.status, await res.text());
+        }
+      } catch (err) {
+        console.error('[Finance] Save error:', err);
+      }
     }, 2000);
 
     return () => {
