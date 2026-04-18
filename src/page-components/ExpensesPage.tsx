@@ -23,6 +23,7 @@ import {
   getExpenseCategoryInfo,
   getExpenseCategoryMap,
   parseTags,
+  findDuplicateExpenses,
 } from '../utils/helpers';
 import { Expense, ExpenseAttachment, ExpenseCategory } from '../types';
 
@@ -114,6 +115,34 @@ export function ExpensesPage() {
   const categoryMap = getExpenseCategoryMap(settings);
   const monthExpenses = expenses.filter((expense) => expense.month === filterMonth);
   const totalMonth = monthExpenses.reduce((sum, expense) => sum + expense.amount, 0);
+
+  // Batch selection
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
+  const [batchCategory, setBatchCategory] = useState('');
+  const toggleSelect = (id: string) => setSelectedIds(prev => {
+    const next = new Set(prev);
+    next.has(id) ? next.delete(id) : next.add(id);
+    return next;
+  });
+  const toggleSelectAll = () => {
+    if (selectedIds.size === filteredExpenses.length) setSelectedIds(new Set());
+    else setSelectedIds(new Set(filteredExpenses.map(e => e.id)));
+  };
+  const handleBatchDelete = () => {
+    if (selectedIds.size === 0) return;
+    if (!confirm(`${selectedIds.size} Ausgaben löschen?`)) return;
+    dispatch({ type: 'DELETE_EXPENSES_BATCH', payload: Array.from(selectedIds) });
+    setSelectedIds(new Set());
+  };
+  const handleBatchCategoryChange = () => {
+    if (selectedIds.size === 0 || !batchCategory) return;
+    dispatch({ type: 'UPDATE_EXPENSES_CATEGORY', payload: { ids: Array.from(selectedIds), category: batchCategory } });
+    setSelectedIds(new Set());
+    setBatchCategory('');
+  };
+
+  // Duplicate warning state
+  const [duplicateWarning, setDuplicateWarning] = useState<string>('');
 
   const categoryOptions = Object.entries(categoryMap).map(([value, info]) => ({ value, label: info.labelDe }));
   const aiCategoryOptions = Object.entries(categoryMap).map(([value, info]) => ({ id: value, label: info.labelDe }));
@@ -244,6 +273,20 @@ export function ExpensesPage() {
 
   const handleSubmit = () => {
     if (!description || !amount) return;
+
+    // Duplicate detection (only for new expenses)
+    if (!editingExpense) {
+      const dupes = findDuplicateExpenses(
+        { amount: parseFloat(amount), date, description },
+        expenses
+      );
+      if (dupes.length > 0 && !duplicateWarning) {
+        setDuplicateWarning(`Mögliches Duplikat: "${description}" für ${amount} am ${date} existiert bereits.`);
+        return;
+      }
+    }
+    setDuplicateWarning('');
+
     const parsedTags = parseTags(tags);
     const payload = {
       description,
@@ -628,6 +671,23 @@ export function ExpensesPage() {
         </Card>
       ) : (
         <div className="space-y-5">
+          {/* Batch action bar */}
+          {selectedIds.size > 0 && (
+            <Card className="flex flex-wrap items-center gap-3 bg-blue-50 p-3 dark:bg-blue-950/20">
+              <span className="text-sm font-semibold text-blue-700 dark:text-blue-300">{selectedIds.size} ausgewählt</span>
+              <Select value={batchCategory} onChange={setBatchCategory} options={[{ value: '', label: 'Kategorie ändern...' }, ...categoryOptions]} />
+              {batchCategory && (
+                <Button size="sm" onClick={handleBatchCategoryChange}>Anwenden</Button>
+              )}
+              <Button size="sm" variant="danger" onClick={handleBatchDelete}>Löschen</Button>
+              <button onClick={() => setSelectedIds(new Set())} className="ml-auto text-xs text-slate-500 hover:text-slate-700 dark:text-gray-400">Auswahl aufheben</button>
+            </Card>
+          )}
+          {filteredExpenses.length > 3 && (
+            <button onClick={toggleSelectAll} className="text-xs font-medium text-blue-600 hover:text-blue-800 dark:text-blue-400">
+              {selectedIds.size === filteredExpenses.length ? 'Alle abwählen' : 'Alle auswählen'}
+            </button>
+          )}
           {Object.entries(groupedByDate).map(([dateKey, items]) => {
             const dayTotal = items.reduce((sum, expense) => sum + expense.amount, 0);
             return (
@@ -645,6 +705,12 @@ export function ExpensesPage() {
                       <Card key={expense.id} className="p-4">
                         <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
                           <div className="flex min-w-0 items-start gap-3">
+                            <input
+                              type="checkbox"
+                              checked={selectedIds.has(expense.id)}
+                              onChange={() => toggleSelect(expense.id)}
+                              className="mt-2 h-4 w-4 flex-shrink-0 rounded border-slate-300 text-blue-600 focus:ring-blue-500"
+                            />
                             <div className="rounded-xl p-2" style={{ backgroundColor: `${categoryInfo.color}15` }}>
                               <Icon name={categoryInfo.icon} size={16} color={categoryInfo.color} />
                             </div>
@@ -759,6 +825,12 @@ export function ExpensesPage() {
               className="block w-full rounded-xl border border-slate-200 bg-white px-4 py-3 text-sm text-gray-900 placeholder-slate-400 focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-500/40 dark:border-gray-700 dark:bg-gray-800 dark:text-white"
             />
           </div>
+          {duplicateWarning && (
+            <div className="rounded-xl border border-amber-300 bg-amber-50 p-3 dark:border-amber-700 dark:bg-amber-950/20">
+              <p className="text-xs font-medium text-amber-700 dark:text-amber-300">{duplicateWarning}</p>
+              <p className="mt-1 text-xs text-amber-600 dark:text-amber-400">Nochmal klicken um trotzdem zu speichern.</p>
+            </div>
+          )}
           <div className="flex gap-3 pt-2">
             <Button variant="secondary" onClick={closeModal} className="flex-1">Abbrechen</Button>
             <Button onClick={handleSubmit} className="flex-1">{editingExpense ? 'Speichern' : 'Hinzufügen'}</Button>

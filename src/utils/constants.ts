@@ -146,6 +146,8 @@ export const DASHBOARD_WIDGET_OPTIONS = [
   { id: 'recent-expenses', label: 'Letzte Ausgaben' },
   { id: 'savings', label: 'Sparziele' },
   { id: 'quick-stats', label: 'Schnellstatistiken' },
+  { id: 'month-comparison', label: 'Monatsvergleich' },
+  { id: 'forecast', label: 'Prognose' },
 ];
 
 export const AI_PROVIDER_OPTIONS = [

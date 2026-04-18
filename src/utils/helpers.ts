@@ -604,3 +604,194 @@ export const calculateBudgetStatus = (
     percentage,
   };
 };
+
+// ========== NEW HELPERS ==========
+
+// Debt: Generate amortization schedule
+export const generateAmortizationSchedule = (
+  remainingAmount: number,
+  monthlyPayment: number,
+  annualInterestRate: number,
+  extraPayment = 0
+): { month: number; date: string; payment: number; principal: number; interest: number; remaining: number }[] => {
+  const schedule: { month: number; date: string; payment: number; principal: number; interest: number; remaining: number }[] = [];
+  let balance = remainingAmount;
+  const monthlyRate = annualInterestRate / 100 / 12;
+  let monthNum = 0;
+  const startDate = new Date();
+
+  while (balance > 0 && monthNum < 600) {
+    monthNum++;
+    const interest = balance * monthlyRate;
+    const totalPayment = Math.min(balance + interest, monthlyPayment + extraPayment);
+    const principal = totalPayment - interest;
+    balance = Math.max(0, balance - principal);
+    const date = new Date(startDate);
+    date.setMonth(date.getMonth() + monthNum);
+    schedule.push({
+      month: monthNum,
+      date: `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}`,
+      payment: totalPayment,
+      principal,
+      interest,
+      remaining: balance,
+    });
+  }
+  return schedule;
+};
+
+// Debt: Compare snowball vs avalanche
+export const compareDebtStrategies = (
+  debts: { name: string; remainingAmount: number; monthlyPayment: number; interestRate: number }[],
+  extraBudget = 0
+): { strategy: string; totalInterest: number; months: number }[] => {
+  const simulate = (ordered: typeof debts) => {
+    const balances = ordered.map(d => d.remainingAmount);
+    const payments = ordered.map(d => d.monthlyPayment);
+    let totalInterest = 0;
+    let months = 0;
+    while (balances.some(b => b > 0) && months < 600) {
+      months++;
+      let extra = extraBudget;
+      for (let i = 0; i < ordered.length; i++) {
+        if (balances[i] <= 0) continue;
+        const rate = ordered[i].interestRate / 100 / 12;
+        const interest = balances[i] * rate;
+        totalInterest += interest;
+        const payment = Math.min(balances[i] + interest, payments[i] + extra);
+        extra = Math.max(0, extra - (payment - payments[i]));
+        balances[i] = Math.max(0, balances[i] - (payment - interest));
+      }
+    }
+    return { totalInterest, months };
+  };
+
+  const avalanche = [...debts].sort((a, b) => b.interestRate - a.interestRate);
+  const snowball = [...debts].sort((a, b) => a.remainingAmount - b.remainingAmount);
+
+  return [
+    { strategy: 'Avalanche (höchster Zins zuerst)', ...simulate(avalanche) },
+    { strategy: 'Snowball (kleinster Betrag zuerst)', ...simulate(snowball) },
+  ];
+};
+
+// Savings: Calculate streak (consecutive months with deposits)
+export const calculateSavingsStreak = (
+  depositHistory: { month: string; amount: number }[] | undefined
+): number => {
+  if (!depositHistory || depositHistory.length === 0) return 0;
+  const months = [...new Set(depositHistory.map(d => d.month))].sort().reverse();
+  const now = new Date();
+  const currentMonth = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
+  let streak = 0;
+  let checkMonth = currentMonth;
+  for (let i = 0; i < 120; i++) {
+    if (months.includes(checkMonth)) {
+      streak++;
+      const [y, m] = checkMonth.split('-').map(Number);
+      const prev = new Date(y, m - 2, 1);
+      checkMonth = `${prev.getFullYear()}-${String(prev.getMonth() + 1).padStart(2, '0')}`;
+    } else {
+      break;
+    }
+  }
+  return streak;
+};
+
+// Budget: Calculate rollover from previous month
+export const calculateBudgetRollover = (
+  category: string,
+  month: string,
+  budgetLimits: { category: string; amount: number; month: string; enableRollover?: boolean }[],
+  expenses: { category: string; month: string; amount: number }[]
+): number => {
+  const [y, m] = month.split('-').map(Number);
+  const prevDate = new Date(y, m - 2, 1);
+  const prevMonth = `${prevDate.getFullYear()}-${String(prevDate.getMonth() + 1).padStart(2, '0')}`;
+  const prevBudget = budgetLimits.find(b => b.category === category && (b.month === prevMonth || b.month === month) && b.enableRollover);
+  if (!prevBudget) return 0;
+  const prevSpent = expenses.filter(e => e.month === prevMonth && e.category === category).reduce((s, e) => s + e.amount, 0);
+  return Math.max(0, prevBudget.amount - prevSpent);
+};
+
+// Global search across all data
+export interface SearchResult {
+  type: 'expense' | 'income' | 'fixed-expense' | 'debt' | 'savings' | 'transfer' | 'freelance-project' | 'invoice';
+  id: string;
+  title: string;
+  subtitle: string;
+  amount?: number;
+  date?: string;
+  icon: string;
+  color: string;
+}
+
+export const globalSearch = (
+  query: string,
+  state: {
+    expenses: { id: string; description: string; amount: number; date: string; category: string; tags?: string[]; note?: string }[];
+    incomes: { id: string; name: string; amount: number; month?: string }[];
+    fixedExpenses: { id: string; name: string; amount: number; category: string }[];
+    debts: { id: string; name: string; remainingAmount: number; totalAmount: number }[];
+    savingsGoals: { id: string; name: string; currentAmount: number; targetAmount: number }[];
+    transfers: { id: string; amount: number; date: string; note?: string }[];
+    freelanceProjects: { id: string; name: string; clientName: string }[];
+    freelanceInvoices: { id: string; invoiceNumber: string; clientName: string; grossAmount: number; issueDate: string }[];
+    settings: Settings;
+  }
+): SearchResult[] => {
+  const q = query.toLowerCase().trim();
+  if (!q) return [];
+  const results: SearchResult[] = [];
+
+  for (const e of state.expenses) {
+    if (e.description.toLowerCase().includes(q) || e.tags?.some(t => t.toLowerCase().includes(q)) || e.note?.toLowerCase().includes(q)) {
+      const info = getExpenseCategoryInfo(e.category, state.settings);
+      results.push({ type: 'expense', id: e.id, title: e.description, subtitle: `${formatCurrency(e.amount, state.settings)} · ${e.date}`, amount: e.amount, date: e.date, icon: info.icon, color: info.color });
+    }
+  }
+  for (const i of state.incomes) {
+    if (i.name.toLowerCase().includes(q)) {
+      results.push({ type: 'income', id: i.id, title: i.name, subtitle: formatCurrency(i.amount, state.settings), amount: i.amount, date: i.month, icon: 'TrendingUp', color: '#10b981' });
+    }
+  }
+  for (const f of state.fixedExpenses) {
+    if (f.name.toLowerCase().includes(q)) {
+      results.push({ type: 'fixed-expense', id: f.id, title: f.name, subtitle: formatCurrency(f.amount, state.settings), amount: f.amount, icon: 'Receipt', color: '#6366f1' });
+    }
+  }
+  for (const d of state.debts) {
+    if (d.name.toLowerCase().includes(q)) {
+      results.push({ type: 'debt', id: d.id, title: d.name, subtitle: `${formatCurrency(d.remainingAmount, state.settings)} verbleibend`, amount: d.remainingAmount, icon: 'CreditCard', color: '#ef4444' });
+    }
+  }
+  for (const s of state.savingsGoals) {
+    if (s.name.toLowerCase().includes(q)) {
+      results.push({ type: 'savings', id: s.id, title: s.name, subtitle: `${formatCurrency(s.currentAmount, state.settings)} / ${formatCurrency(s.targetAmount, state.settings)}`, amount: s.currentAmount, icon: 'PiggyBank', color: '#10b981' });
+    }
+  }
+  for (const p of state.freelanceProjects) {
+    if (p.name.toLowerCase().includes(q) || p.clientName.toLowerCase().includes(q)) {
+      results.push({ type: 'freelance-project', id: p.id, title: p.name, subtitle: p.clientName, icon: 'Briefcase', color: '#8b5cf6' });
+    }
+  }
+  for (const inv of state.freelanceInvoices) {
+    if (inv.invoiceNumber.toLowerCase().includes(q) || inv.clientName.toLowerCase().includes(q)) {
+      results.push({ type: 'invoice', id: inv.id, title: inv.invoiceNumber, subtitle: `${inv.clientName} · ${formatCurrency(inv.grossAmount, state.settings)}`, amount: inv.grossAmount, date: inv.issueDate, icon: 'FileText', color: '#f59e0b' });
+    }
+  }
+
+  return results.slice(0, 50);
+};
+
+// Duplicate detection for expenses
+export const findDuplicateExpenses = (
+  expense: { amount: number; date: string; description: string },
+  existingExpenses: { id: string; amount: number; date: string; description: string }[]
+): { id: string; amount: number; date: string; description: string }[] => {
+  return existingExpenses.filter(e =>
+    Math.abs(e.amount - expense.amount) < 0.01 &&
+    e.date === expense.date &&
+    e.description.toLowerCase() === expense.description.toLowerCase()
+  );
+};

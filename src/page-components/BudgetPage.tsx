@@ -1,9 +1,9 @@
-import { useState } from 'react';
+import { useState, useMemo } from 'react';
 import { useFinance } from '@/lib/finance-context';
 import { Card, Button, Input, Select, Modal, EmptyState, Icon, ProgressBar } from '../components/ui';
-import { formatCurrency, getExpenseCategoryMap, getExpenseCategoryInfo } from '../utils/helpers';
+import { formatCurrency, getExpenseCategoryMap, getExpenseCategoryInfo, calculateBudgetRollover } from '../utils/helpers';
 import { BudgetLimit, ExpenseCategory } from '../types';
-import { Pencil, Trash2, AlertTriangle } from 'lucide-react';
+import { Pencil, Trash2, AlertTriangle, RotateCcw, CalendarDays } from 'lucide-react';
 
 export function BudgetPage() {
   const { state, dispatch } = useFinance();
@@ -14,6 +14,8 @@ export function BudgetPage() {
 
   const [category, setCategory] = useState<ExpenseCategory>('food');
   const [amount, setAmount] = useState('');
+  const [enableRollover, setEnableRollover] = useState(false);
+  const [showWeekly, setShowWeekly] = useState(false);
 
   const monthExpenses = expenses.filter(e => e.month === currentMonth);
 
@@ -21,8 +23,10 @@ export function BudgetPage() {
     if (budget) {
       setEditingBudget(budget);
       setCategory(budget.category); setAmount(budget.amount.toString());
+      setEnableRollover(budget.enableRollover || false);
     } else {
       setEditingBudget(null); setCategory('food'); setAmount('');
+      setEnableRollover(false);
     }
     setIsModalOpen(true);
   };
@@ -31,7 +35,7 @@ export function BudgetPage() {
 
   const handleSubmit = () => {
     if (!amount) return;
-    const data = { category, amount: parseFloat(amount), monthlyLimit: parseFloat(amount), month: currentMonth, isRecurring: false };
+    const data = { category, amount: parseFloat(amount), monthlyLimit: parseFloat(amount), month: currentMonth, isRecurring: false, enableRollover };
     if (editingBudget) dispatch({ type: 'UPDATE_BUDGET_LIMIT', payload: { ...editingBudget, ...data } });
     else dispatch({ type: 'ADD_BUDGET_LIMIT', payload: data });
     closeModal();
@@ -60,6 +64,12 @@ export function BudgetPage() {
           </p>
         </div>
         <Button onClick={() => openModal()} icon="Plus">Budget hinzufügen</Button>
+        <button
+          onClick={() => setShowWeekly(v => !v)}
+          className={`rounded-xl border px-3 py-2 text-xs font-medium transition-colors ${showWeekly ? 'border-blue-300 bg-blue-50 text-blue-700 dark:border-blue-700 dark:bg-blue-950/30 dark:text-blue-300' : 'border-slate-200 text-gray-700 dark:border-gray-700 dark:text-gray-300'}`}
+        >
+          <CalendarDays size={14} className="inline mr-1" /> Wochenansicht
+        </button>
       </div>
 
       {/* Summary Cards */}
@@ -108,11 +118,16 @@ export function BudgetPage() {
           {budgetLimits.map((budget) => {
              const catInfo = getExpenseCategoryInfo(budget.category, settings);
             const spent = monthExpenses.filter(e => e.category === budget.category).reduce((s, e) => s + e.amount, 0);
-            const progress = budget.amount > 0 ? (spent / budget.amount) * 100 : 0;
-            const isOver = spent > budget.amount;
-            const isWarning = progress >= 80 && !isOver;
+            const rollover = budget.enableRollover ? calculateBudgetRollover(budget.category, currentMonth, budgetLimits, expenses) : 0;
+            const effectiveBudget = budget.amount + rollover;
+            const progress = effectiveBudget > 0 ? (spent / effectiveBudget) * 100 : 0;
+            const isOver = spent > effectiveBudget;
+            const isCritical = progress >= 90 && !isOver;
+            const isWarning = progress >= 75 && !isCritical && !isOver;
+            const weeklyBudget = effectiveBudget / 4.33;
+            const alarmColor = isOver ? '#ef4444' : isCritical ? '#f97316' : isWarning ? '#f59e0b' : catInfo.color;
             return (
-              <Card key={budget.id} className={`p-5 ${isOver ? 'ring-2 ring-red-300 dark:ring-red-700' : ''}`}>
+              <Card key={budget.id} className={`p-5 ${isOver ? 'ring-2 ring-red-300 dark:ring-red-700' : isCritical ? 'ring-2 ring-orange-300 dark:ring-orange-700' : ''}`}>
                 <div className="flex flex-col gap-3">
                   <div className="flex items-center justify-between gap-3">
                     <div className="flex items-center gap-3 min-w-0">
@@ -125,16 +140,23 @@ export function BudgetPage() {
                           {isOver && <span className="inline-flex items-center gap-1 text-xs text-red-600 dark:text-red-400 font-medium">
                             <AlertTriangle size={12} /> Überschritten!
                           </span>}
+                          {isCritical && <span className="inline-flex items-center gap-1 text-xs text-orange-600 dark:text-orange-400 font-medium">
+                            <AlertTriangle size={12} /> Kritisch
+                          </span>}
                           {isWarning && <span className="text-xs text-amber-600 dark:text-amber-400 font-medium">Fast am Limit</span>}
+                          {rollover > 0 && <span className="inline-flex items-center gap-1 text-xs text-emerald-600 dark:text-emerald-400 font-medium">
+                            <RotateCcw size={10} /> +{formatCurrency(rollover, settings)} Rollover
+                          </span>}
                         </div>
                         <p className="text-xs text-slate-500 dark:text-gray-500">
-                          {formatCurrency(spent, settings)} von {formatCurrency(budget.amount, settings)}
-                          {isOver && ` · ${formatCurrency(spent - budget.amount, settings)} zu viel`}
+                          {formatCurrency(spent, settings)} von {formatCurrency(effectiveBudget, settings)}
+                          {isOver && ` · ${formatCurrency(spent - effectiveBudget, settings)} zu viel`}
+                          {showWeekly && ` · ~${formatCurrency(weeklyBudget, settings)}/Woche`}
                         </p>
                       </div>
                     </div>
                     <div className="flex items-center gap-2 flex-shrink-0">
-                      <span className={`text-lg font-bold ${isOver ? 'text-red-600 dark:text-red-400' : 'text-gray-900 dark:text-white'}`}>
+                      <span className={`text-lg font-bold ${isOver ? 'text-red-600 dark:text-red-400' : isCritical ? 'text-orange-600 dark:text-orange-400' : 'text-gray-900 dark:text-white'}`}>
                         {Math.min(progress, 100).toFixed(0)}%
                       </span>
                       <div className="flex gap-1">
@@ -148,7 +170,7 @@ export function BudgetPage() {
                     </div>
                   </div>
                   <ProgressBar value={Math.min(progress, 100)} max={100}
-                    color={isOver ? '#ef4444' : isWarning ? '#f59e0b' : catInfo.color} size="lg" />
+                    color={alarmColor} size="lg" />
                 </div>
               </Card>
             );
@@ -176,6 +198,10 @@ export function BudgetPage() {
         <div className="space-y-4">
           <Select label="Kategorie" value={category} onChange={(v) => setCategory(v as ExpenseCategory)} options={categoryOptions} />
           <Input label="Monatliches Budget (€)" type="number" value={amount} onChange={setAmount} placeholder="0.00" icon="Euro" />
+          <label className="flex items-center gap-2 cursor-pointer">
+            <input type="checkbox" checked={enableRollover} onChange={e => setEnableRollover(e.target.checked)} className="h-4 w-4 rounded border-slate-300 text-blue-600 focus:ring-blue-500" />
+            <span className="text-sm text-gray-700 dark:text-gray-300">Ungenutztes Budget in nächsten Monat übertragen (Rollover)</span>
+          </label>
           <div className="flex gap-3 pt-2">
             <Button variant="secondary" onClick={closeModal} className="flex-1">Abbrechen</Button>
             <Button onClick={handleSubmit} className="flex-1">{editingBudget ? 'Speichern' : 'Hinzufügen'}</Button>

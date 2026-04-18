@@ -1,9 +1,9 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { useFinance } from '@/lib/finance-context';
 import { Card, Button, Input, Select, Modal, EmptyState, Icon, Badge, ProgressBar } from '../components/ui';
-import { formatCurrency } from '../utils/helpers';
+import { formatCurrency, calculateSavingsStreak } from '../utils/helpers';
 import { SavingsGoal } from '../types';
-import { Pencil, Trash2, PiggyBank, Plus, Minus } from 'lucide-react';
+import { Pencil, Trash2, PiggyBank, Plus, Minus, Flame, Star } from 'lucide-react';
 
 const GOAL_ICONS: Record<string, { icon: string; color: string; label: string }> = {
   emergency: { icon: 'Shield', color: '#ef4444', label: 'Notgroschen' },
@@ -31,7 +31,8 @@ export function SavingsPage() {
   const [goalCategory, setGoalCategory] = useState('other');
   const [deadline, setDeadline] = useState('');
   const [note, setNote] = useState('');
-
+  const [priority, setPriority] = useState('3');
+  const [confettiGoalId, setConfettiGoalId] = useState<string | null>(null);
   const totalSaved = savingsGoals.reduce((s, g) => s + g.currentAmount, 0);
   const totalTarget = savingsGoals.reduce((s, g) => s + g.targetAmount, 0);
   const totalMonthly = savingsGoals.reduce((s, g) => s + g.monthlyContribution, 0);
@@ -42,10 +43,12 @@ export function SavingsPage() {
       setName(goal.name); setTargetAmount(goal.targetAmount.toString());
       setCurrentAmount(goal.currentAmount.toString()); setMonthlyContribution(goal.monthlyContribution.toString());
       setGoalCategory(goal.goalCategory || 'other'); setDeadline(goal.deadline || ''); setNote(goal.note || '');
+      setPriority(String(goal.priority || 3));
     } else {
       setEditingGoal(null);
       setName(''); setTargetAmount(''); setCurrentAmount('0'); setMonthlyContribution('0');
       setGoalCategory('other'); setDeadline(''); setNote('');
+      setPriority('3');
     }
     setIsModalOpen(true);
   };
@@ -61,6 +64,7 @@ export function SavingsPage() {
       color: GOAL_ICONS[goalCategory]?.color || '#6366f1',
       icon: GOAL_ICONS[goalCategory]?.icon || 'Target',
       isCompleted: parseFloat(currentAmount || '0') >= parseFloat(targetAmount),
+      priority: parseInt(priority) || 3,
     };
     if (editingGoal) dispatch({ type: 'UPDATE_SAVINGS_GOAL', payload: { ...editingGoal, ...data } });
     else dispatch({ type: 'ADD_SAVINGS_GOAL', payload: data });
@@ -73,6 +77,15 @@ export function SavingsPage() {
     if (!depositGoal || !depositAmount) return;
     const amt = parseFloat(depositAmount);
     const newAmt = isWithdraw ? Math.max(0, depositGoal.currentAmount - amt) : depositGoal.currentAmount + amt;
+    const oldProgress = (depositGoal.currentAmount / depositGoal.targetAmount) * 100;
+    const newProgress = (newAmt / depositGoal.targetAmount) * 100;
+    // Check milestone crossings (25%, 50%, 75%, 100%)
+    const milestones = [25, 50, 75, 100];
+    const crossed = milestones.some(m => oldProgress < m && newProgress >= m);
+    if (crossed && !isWithdraw) {
+      setConfettiGoalId(depositGoal.id);
+      setTimeout(() => setConfettiGoalId(null), 3000);
+    }
     dispatch({ type: 'UPDATE_SAVINGS_GOAL', payload: { ...depositGoal, currentAmount: newAmt } });
     setDepositGoal(null); setDepositAmount('');
   };
@@ -112,6 +125,16 @@ export function SavingsPage() {
         </Card>
       </div>
 
+      {/* Confetti animation */}
+      {confettiGoalId && (
+        <div className="fixed inset-0 z-[100] pointer-events-none flex items-center justify-center">
+          <div className="animate-bounce text-6xl">🎉🎊✨</div>
+          <div className="absolute text-center">
+            <p className="text-2xl font-bold text-emerald-600 dark:text-emerald-400 animate-pulse">Meilenstein erreicht!</p>
+          </div>
+        </div>
+      )}
+
       {savingsGoals.length === 0 ? (
         <Card><EmptyState icon="PiggyBank" title="Keine Sparziele"
           description="Erstelle ein Sparziel, um auf deine Wünsche hinzusparen."
@@ -124,6 +147,7 @@ export function SavingsPage() {
             const done = goal.currentAmount >= goal.targetAmount;
             const remaining = goal.targetAmount - goal.currentAmount;
             const monthsLeft = goal.monthlyContribution > 0 ? Math.ceil(remaining / goal.monthlyContribution) : Infinity;
+            const streak = calculateSavingsStreak(goal.depositHistory || []);
             return (
               <Card key={goal.id} className={`p-5 ${done ? 'ring-2 ring-emerald-400 dark:ring-emerald-600' : ''}`}>
                 <div className="flex flex-col gap-4">
@@ -136,6 +160,8 @@ export function SavingsPage() {
                         <div className="flex items-center gap-2 flex-wrap">
                           <h3 className="text-sm font-semibold text-gray-900 dark:text-white truncate">{goal.name}</h3>
                           {done && <Badge color="#10b981">Erreicht! 🎉</Badge>}
+                          {streak > 0 && <span className="inline-flex items-center gap-1 text-xs font-medium text-orange-600 dark:text-orange-400"><Flame size={12} /> {streak} Monate Streak</span>}
+                          {(goal.priority || 0) <= 2 && <Star size={12} className="text-amber-400" />}
                         </div>
                         {goal.monthlyContribution > 0 && (
                           <p className="text-xs text-slate-500 dark:text-gray-500">+{formatCurrency(goal.monthlyContribution, settings)}/Monat
@@ -189,6 +215,13 @@ export function SavingsPage() {
           <Select label="Kategorie" value={goalCategory} onChange={setGoalCategory} options={goalOptions} />
           <Input label="Zieldatum (optional)" type="date" value={deadline} onChange={setDeadline} />
           <Input label="Notiz (optional)" value={note} onChange={setNote} placeholder="Zusätzliche Informationen..." />
+          <Select label="Priorität" value={priority} onChange={setPriority} options={[
+            { value: '1', label: '⭐ Sehr hoch' },
+            { value: '2', label: '🔥 Hoch' },
+            { value: '3', label: 'Normal' },
+            { value: '4', label: 'Niedrig' },
+            { value: '5', label: 'Sehr niedrig' },
+          ]} />
           <div className="flex gap-3 pt-2">
             <Button variant="secondary" onClick={closeModal} className="flex-1">Abbrechen</Button>
             <Button onClick={handleSubmit} className="flex-1">{editingGoal ? 'Speichern' : 'Hinzufügen'}</Button>

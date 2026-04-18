@@ -101,6 +101,8 @@ const initialState: FinanceState = {
   },
   netWorthHistory: [],
   notifications: [],
+  accountRules: [],
+  undoStack: [],
   settings: DEFAULT_SETTINGS,
   selectedMonth: getCurrentMonth(),
   currentMonth: getCurrentMonth(),

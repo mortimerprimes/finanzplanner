@@ -4,7 +4,7 @@ import { Calculator, CircleDollarSign, Pencil, Trash2 } from 'lucide-react';
 import { useFinance } from '@/lib/finance-context';
 import { useTheme } from '../hooks/useTheme';
 import { Card, Button, Input, Select, Modal, EmptyState, Icon, Badge, ProgressBar } from '../components/ui';
-import { formatCurrency, formatDate } from '../utils/helpers';
+import { formatCurrency, formatDate, generateAmortizationSchedule, compareDebtStrategies } from '../utils/helpers';
 import { DEBT_TYPES } from '../utils/constants';
 import { Debt, DebtType } from '../types';
 import { calculateDebtProjection, calculateRequiredMonthlyPayment } from '../utils/debtCalculations';
@@ -57,6 +57,32 @@ export function DebtsPage() {
   const slowestProjection = debtProjections
     .filter((item) => item.debt.remainingAmount > 0 && item.projection.feasible)
     .sort((left, right) => right.projection.months - left.projection.months)[0];
+
+  // Strategy comparison
+  const [showStrategyComparison, setShowStrategyComparison] = useState(false);
+  const [extraBudget, setExtraBudget] = useState('200');
+  const strategyResult = useMemo(() => {
+    if (activeDebts.length < 2) return null;
+    const results = compareDebtStrategies(activeDebts, parseFloat(extraBudget || '0'));
+    return { avalanche: results[0], snowball: results[1] };
+  }, [activeDebts, extraBudget]);
+
+  // Amortization schedule
+  const [amortizationDebtId, setAmortizationDebtId] = useState('');
+  const [amortizationExtra, setAmortizationExtra] = useState('0');
+  const amortizationSchedule = useMemo(() => {
+    const debt = debts.find(d => d.id === amortizationDebtId);
+    if (!debt) return [];
+    return generateAmortizationSchedule(debt.remainingAmount, debt.monthlyPayment, debt.interestRate, parseFloat(amortizationExtra || '0'));
+  }, [debts, amortizationDebtId, amortizationExtra]);
+
+  // Debt-free countdown
+  const debtFreeDate = useMemo(() => {
+    if (!slowestProjection || !slowestProjection.projection.feasible) return null;
+    const d = new Date();
+    d.setMonth(d.getMonth() + slowestProjection.projection.months);
+    return d;
+  }, [slowestProjection]);
 
   const baselineScenario = selectedScenarioDebt ? calculateDebtProjection(selectedScenarioDebt) : null;
   const monthlyScenario = selectedScenarioDebt ? calculateDebtProjection(selectedScenarioDebt, { extraMonthlyPayment: extraMonthlyValue }) : null;
@@ -318,6 +344,101 @@ export function DebtsPage() {
           </div>
         </Card>
       </div>
+
+      {/* Debt-free countdown */}
+      {debtFreeDate && (
+        <Card className="p-5 bg-gradient-to-r from-emerald-50 to-teal-50 dark:from-emerald-950/20 dark:to-teal-950/20">
+          <div className="flex items-center gap-4">
+            <div className="flex h-14 w-14 items-center justify-center rounded-2xl bg-emerald-100 dark:bg-emerald-900/40">
+              <Icon name="PartyPopper" size={28} color="#10b981" />
+            </div>
+            <div>
+              <h3 className="text-sm font-bold text-gray-900 dark:text-white">Schuldenfreiheit-Countdown</h3>
+              <p className="text-xs text-slate-600 dark:text-gray-400">
+                Noch ca. <span className="font-bold text-emerald-600 dark:text-emerald-400">{slowestProjection?.projection.months || 0} Monate</span> bis zur vollständigen Tilgung
+              </p>
+              <p className="text-xs text-slate-500 dark:text-gray-500">Voraussichtlich schuldenfrei am {debtFreeDate.toLocaleDateString('de-DE', { month: 'long', year: 'numeric' })}</p>
+            </div>
+          </div>
+        </Card>
+      )}
+
+      {/* Strategy comparison */}
+      {activeDebts.length >= 2 && (
+        <Card className="p-5">
+          <button onClick={() => setShowStrategyComparison(v => !v)} className="flex w-full items-center justify-between">
+            <h3 className="text-sm font-bold text-gray-900 dark:text-white">Tilgungsstrategie-Vergleich</h3>
+            <span className="text-xs text-blue-600 dark:text-blue-400">{showStrategyComparison ? 'Ausblenden' : 'Anzeigen'}</span>
+          </button>
+          {showStrategyComparison && strategyResult && (
+            <div className="mt-4 space-y-4">
+              <div className="flex items-center gap-3">
+                <Input label="Extra-Budget/Monat (€)" type="number" value={extraBudget} onChange={setExtraBudget} placeholder="200" icon="Euro" />
+              </div>
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                <div className={`rounded-2xl border p-4 ${strategyResult.avalanche.totalInterest <= strategyResult.snowball.totalInterest ? 'border-emerald-300 bg-emerald-50 dark:border-emerald-700 dark:bg-emerald-950/20' : 'border-slate-200 dark:border-gray-800'}`}>
+                  <h4 className="text-sm font-bold text-gray-900 dark:text-white">Lawinenmethode</h4>
+                  <p className="text-xs text-slate-500 dark:text-gray-500 mb-2">Höchsten Zins zuerst</p>
+                  <p className="text-sm"><span className="font-semibold">Zinsen:</span> {formatCurrency(strategyResult.avalanche.totalInterest, settings)}</p>
+                  <p className="text-sm"><span className="font-semibold">Dauer:</span> {strategyResult.avalanche.months} Monate</p>
+                  {strategyResult.avalanche.totalInterest <= strategyResult.snowball.totalInterest && (
+                    <span className="mt-2 inline-block rounded-full bg-emerald-100 px-2 py-0.5 text-xs font-semibold text-emerald-700 dark:bg-emerald-900/40 dark:text-emerald-300">Empfohlen</span>
+                  )}
+                </div>
+                <div className={`rounded-2xl border p-4 ${strategyResult.snowball.totalInterest < strategyResult.avalanche.totalInterest ? 'border-emerald-300 bg-emerald-50 dark:border-emerald-700 dark:bg-emerald-950/20' : 'border-slate-200 dark:border-gray-800'}`}>
+                  <h4 className="text-sm font-bold text-gray-900 dark:text-white">Schneeballmethode</h4>
+                  <p className="text-xs text-slate-500 dark:text-gray-500 mb-2">Kleinste Schuld zuerst</p>
+                  <p className="text-sm"><span className="font-semibold">Zinsen:</span> {formatCurrency(strategyResult.snowball.totalInterest, settings)}</p>
+                  <p className="text-sm"><span className="font-semibold">Dauer:</span> {strategyResult.snowball.months} Monate</p>
+                  {strategyResult.snowball.totalInterest < strategyResult.avalanche.totalInterest && (
+                    <span className="mt-2 inline-block rounded-full bg-emerald-100 px-2 py-0.5 text-xs font-semibold text-emerald-700 dark:bg-emerald-900/40 dark:text-emerald-300">Empfohlen</span>
+                  )}
+                </div>
+              </div>
+              <p className="text-xs text-slate-500 dark:text-gray-500">
+                Ersparnis mit Lawinenmethode: {formatCurrency(Math.abs(strategyResult.snowball.totalInterest - strategyResult.avalanche.totalInterest), settings)}
+              </p>
+            </div>
+          )}
+        </Card>
+      )}
+
+      {/* Amortization schedule */}
+      {activeDebts.length > 0 && (
+        <Card className="p-5">
+          <h3 className="text-sm font-bold text-gray-900 dark:text-white mb-3">Tilgungsplan</h3>
+          <div className="flex flex-wrap gap-3 mb-4">
+            <Select value={amortizationDebtId} onChange={setAmortizationDebtId} options={[{ value: '', label: 'Schuld wählen...' }, ...activeDebts.map(d => ({ value: d.id, label: `${d.name} (${formatCurrency(d.remainingAmount, settings)})` }))]} />
+            <Input type="number" value={amortizationExtra} onChange={setAmortizationExtra} placeholder="Extra-Zahlung" icon="Euro" />
+          </div>
+          {amortizationSchedule.length > 0 && (
+            <div className="max-h-80 overflow-auto rounded-xl border border-slate-200 dark:border-gray-800">
+              <table className="w-full text-xs">
+                <thead className="sticky top-0 bg-slate-50 dark:bg-gray-900">
+                  <tr>
+                    <th className="px-3 py-2 text-left font-semibold text-slate-600 dark:text-gray-400">Monat</th>
+                    <th className="px-3 py-2 text-right font-semibold text-slate-600 dark:text-gray-400">Rate</th>
+                    <th className="px-3 py-2 text-right font-semibold text-slate-600 dark:text-gray-400">Tilgung</th>
+                    <th className="px-3 py-2 text-right font-semibold text-slate-600 dark:text-gray-400">Zinsen</th>
+                    <th className="px-3 py-2 text-right font-semibold text-slate-600 dark:text-gray-400">Restschuld</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-slate-100 dark:divide-gray-800">
+                  {amortizationSchedule.map((entry) => (
+                    <tr key={entry.month} className="hover:bg-slate-50 dark:hover:bg-gray-800/50">
+                      <td className="px-3 py-2 text-gray-900 dark:text-white">{entry.date}</td>
+                      <td className="px-3 py-2 text-right text-gray-900 dark:text-white">{formatCurrency(entry.payment, settings)}</td>
+                      <td className="px-3 py-2 text-right text-emerald-600 dark:text-emerald-400">{formatCurrency(entry.principal, settings)}</td>
+                      <td className="px-3 py-2 text-right text-red-500 dark:text-red-400">{formatCurrency(entry.interest, settings)}</td>
+                      <td className="px-3 py-2 text-right font-medium text-gray-900 dark:text-white">{formatCurrency(entry.remaining, settings)}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </Card>
+      )}
 
       {debts.length === 0 ? (
         <Card>

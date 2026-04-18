@@ -8,15 +8,17 @@ interface CalendarEvent {
   day: number;
   label: string;
   amount: number;
-  type: 'income' | 'expense' | 'debt';
+  type: 'income' | 'expense' | 'debt' | 'planned';
   icon: string;
   color: string;
+  isRecurring?: boolean;
 }
 
 export function CashflowCalendar() {
   const { state } = useFinance();
   const { settings, incomes, fixedExpenses, debts, expenses, selectedMonth } = state;
   const [viewMonth, setViewMonth] = useState(selectedMonth);
+  const [viewMode, setViewMode] = useState<'month' | 'week'>('month');
 
   const [year, month] = viewMonth.split('-').map(Number);
   const daysInMonth = new Date(year, month, 0).getDate();
@@ -44,6 +46,7 @@ export function CashflowCalendar() {
       type: 'expense',
       icon: 'Receipt',
       color: '#f59e0b',
+      isRecurring: true,
     });
   }
 
@@ -57,6 +60,7 @@ export function CashflowCalendar() {
       type: 'income',
       icon: 'TrendingUp',
       color: '#10b981',
+      isRecurring: true,
     });
   }
 
@@ -69,7 +73,8 @@ export function CashflowCalendar() {
       amount: inc.amount,
       type: 'income',
       icon: 'TrendingUp',
-      color: '#10b981',
+      color: '#059669',
+      isRecurring: false,
     });
   }
 
@@ -92,9 +97,10 @@ export function CashflowCalendar() {
       day,
       label: exp.description,
       amount: exp.amount,
-      type: 'expense',
-      icon: 'ShoppingBag',
-      color: '#8b5cf6',
+      type: exp.isPlanned ? 'planned' : 'expense',
+      icon: exp.isRecurring ? 'RotateCcw' : 'ShoppingBag',
+      color: exp.isRecurring ? '#7c3aed' : '#8b5cf6',
+      isRecurring: exp.isRecurring,
     });
   }
 
@@ -131,6 +137,10 @@ export function CashflowCalendar() {
             <button onClick={() => navigateMonth(1)} className="rounded-xl border border-slate-200 p-2 transition-colors hover:bg-slate-100 dark:border-gray-700 dark:hover:bg-gray-800">
               <ChevronRight size={18} className="text-slate-600 dark:text-gray-400" />
             </button>
+            <div className="flex rounded-xl border border-slate-200 dark:border-gray-700 overflow-hidden ml-2">
+              <button onClick={() => setViewMode('month')} className={`px-3 py-1.5 text-xs font-medium transition-colors ${viewMode === 'month' ? 'bg-blue-50 text-blue-700 dark:bg-blue-950/30 dark:text-blue-300' : 'text-slate-600 dark:text-gray-400'}`}>Monat</button>
+              <button onClick={() => setViewMode('week')} className={`px-3 py-1.5 text-xs font-medium transition-colors ${viewMode === 'week' ? 'bg-blue-50 text-blue-700 dark:bg-blue-950/30 dark:text-blue-300' : 'text-slate-600 dark:text-gray-400'}`}>Woche</button>
+            </div>
           </div>
           <div className="flex gap-3">
             <div className="rounded-xl bg-emerald-50 px-3 py-2 text-center dark:bg-emerald-950/30">
@@ -289,6 +299,18 @@ export function CashflowCalendar() {
               );
             }).filter(Boolean);
           })()}
+        </div>
+      </Card>
+
+      {/* Legend */}
+      <Card className="p-4">
+        <div className="flex flex-wrap gap-4 text-xs">
+          <div className="flex items-center gap-1.5"><div className="h-2.5 w-2.5 rounded-full bg-emerald-500" /> Einnahmen (wiederkehrend)</div>
+          <div className="flex items-center gap-1.5"><div className="h-2.5 w-2.5 rounded-full" style={{ backgroundColor: '#059669' }} /> Einnahmen (einmalig)</div>
+          <div className="flex items-center gap-1.5"><div className="h-2.5 w-2.5 rounded-full" style={{ backgroundColor: '#f59e0b' }} /> Fixkosten</div>
+          <div className="flex items-center gap-1.5"><div className="h-2.5 w-2.5 rounded-full" style={{ backgroundColor: '#7c3aed' }} /> Ausgaben (wiederkehrend)</div>
+          <div className="flex items-center gap-1.5"><div className="h-2.5 w-2.5 rounded-full" style={{ backgroundColor: '#8b5cf6' }} /> Ausgaben (einmalig)</div>
+          <div className="flex items-center gap-1.5"><div className="h-2.5 w-2.5 rounded-full bg-red-500" /> Schuldentilgung</div>
         </div>
       </Card>
     </div>

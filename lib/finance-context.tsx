@@ -10,6 +10,7 @@ import type {
   SavingsGoal,
   BudgetLimit,
   Account,
+  AccountRule,
   Transfer,
   Settings,
   BankConnection,
@@ -20,6 +21,7 @@ import type {
   InvoiceProfile,
   NetWorthSnapshot,
   AppNotification,
+  UndoEntry,
 } from '@/src/types';
 import { DEFAULT_SETTINGS } from '@/src/utils/constants';
 import { generateId, getCurrentMonth } from '@/src/utils/helpers';
@@ -60,6 +62,8 @@ const initialState: FinanceState = {
   },
   netWorthHistory: [],
   notifications: [],
+  accountRules: [],
+  undoStack: [],
   settings: DEFAULT_SETTINGS,
   selectedMonth: getCurrentMonth(),
   currentMonth: getCurrentMonth(),
@@ -116,6 +120,17 @@ type Action =
   | { type: 'MARK_NOTIFICATION_READ'; payload: string }
   | { type: 'DISMISS_NOTIFICATION'; payload: string }
   | { type: 'CLEAR_ALL_NOTIFICATIONS' }
+  // Account rules
+  | { type: 'ADD_ACCOUNT_RULE'; payload: Omit<AccountRule, 'id'> }
+  | { type: 'UPDATE_ACCOUNT_RULE'; payload: AccountRule }
+  | { type: 'DELETE_ACCOUNT_RULE'; payload: string }
+  // Undo
+  | { type: 'PUSH_UNDO'; payload: UndoEntry }
+  | { type: 'POP_UNDO' }
+  // Batch delete expenses
+  | { type: 'DELETE_EXPENSES_BATCH'; payload: string[] }
+  // Batch update expenses category
+  | { type: 'UPDATE_EXPENSES_CATEGORY'; payload: { ids: string[]; category: string } }
   // Data management
   | { type: 'IMPORT_DATA'; payload: Partial<FinanceState> }
   | { type: 'RESET_DATA' }
@@ -130,6 +145,8 @@ function financeReducer(state: FinanceState, action: Action): FinanceState {
       return {
         ...state,
         ...action.payload,
+        accountRules: action.payload.accountRules || state.accountRules || [],
+        undoStack: state.undoStack || [],
         currentMonth: action.payload.currentMonth || action.payload.selectedMonth || state.currentMonth,
         settings: {
           ...DEFAULT_SETTINGS,
@@ -335,6 +352,32 @@ function financeReducer(state: FinanceState, action: Action): FinanceState {
       };
     case 'CLEAR_ALL_NOTIFICATIONS':
       return { ...state, notifications: [] };
+
+    case 'ADD_ACCOUNT_RULE':
+      return { ...state, accountRules: [...(state.accountRules || []), { ...action.payload, id: generateId() }] };
+    case 'UPDATE_ACCOUNT_RULE':
+      return { ...state, accountRules: (state.accountRules || []).map(r => r.id === action.payload.id ? action.payload : r) };
+    case 'DELETE_ACCOUNT_RULE':
+      return { ...state, accountRules: (state.accountRules || []).filter(r => r.id !== action.payload) };
+
+    case 'PUSH_UNDO':
+      return { ...state, undoStack: [...(state.undoStack || []).slice(-4), action.payload] };
+    case 'POP_UNDO': {
+      const stack = state.undoStack || [];
+      if (stack.length === 0) return state;
+      const last = stack[stack.length - 1];
+      return { ...state, ...last.patch, undoStack: stack.slice(0, -1) };
+    }
+
+    case 'DELETE_EXPENSES_BATCH':
+      return { ...state, expenses: state.expenses.filter(e => !action.payload.includes(e.id)) };
+    case 'UPDATE_EXPENSES_CATEGORY':
+      return {
+        ...state,
+        expenses: state.expenses.map(e =>
+          action.payload.ids.includes(e.id) ? { ...e, category: action.payload.category } : e
+        ),
+      };
 
     case 'IMPORT_DATA':
       return {

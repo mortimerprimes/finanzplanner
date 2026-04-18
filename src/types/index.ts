@@ -41,6 +41,7 @@ export interface FixedExpense {
 
 // Schulden (Debts)
 export type DebtType = 'loan' | 'credit_card' | 'mortgage' | 'personal' | 'student' | 'other';
+export type DebtStrategy = 'avalanche' | 'snowball';
 
 export interface Debt {
   id: string;
@@ -53,6 +54,16 @@ export interface Debt {
   startDate: string;
   note?: string;
   createdAt: string;
+}
+
+// Amortization schedule entry
+export interface AmortizationEntry {
+  month: number;
+  date: string;
+  payment: number;
+  principal: number;
+  interest: number;
+  remaining: number;
 }
 
 // Variable Ausgaben (Variable Expenses)
@@ -137,6 +148,17 @@ export interface Expense {
   note?: string;
   attachment?: ExpenseAttachment;
   createdAt: string;
+  // Split transaction support
+  splits?: ExpenseSplit[];
+  // Planned (future) expense, not yet booked
+  isPlanned?: boolean;
+}
+
+// Split transaction: one expense → multiple categories
+export interface ExpenseSplit {
+  category: ExpenseCategory;
+  amount: number;
+  description?: string;
 }
 
 // Sparziele (Savings Goals)
@@ -153,6 +175,17 @@ export interface SavingsGoal {
   isCompleted: boolean;
   note?: string;
   createdAt: string;
+  // Enhancement: goal image
+  imageUrl?: string;
+  // Enhancement: deposit history for streaks
+  depositHistory?: SavingsDeposit[];
+  priority?: number; // for auto-distribution ordering
+}
+
+export interface SavingsDeposit {
+  month: string; // "2026-04"
+  amount: number;
+  date: string;
 }
 
 // Budget Limits
@@ -163,6 +196,9 @@ export interface BudgetLimit {
   monthlyLimit: number;
   month: string;
   isRecurring: boolean;
+  // Enhancement: rollover unused budget
+  enableRollover?: boolean;
+  rolloverAmount?: number;
 }
 
 // Konten (Accounts)
@@ -178,6 +214,17 @@ export interface Account {
   isDefault: boolean;
   note?: string;
   createdAt: string;
+  // Enhancement: credit card billing
+  billingCycleDay?: number; // day of month billing cycle starts
+  paymentDueDay?: number; // day of month payment is due
+}
+
+// Auto-assign rules for accounts
+export interface AccountRule {
+  id: string;
+  keyword: string; // match expense description
+  accountId: string;
+  category?: ExpenseCategory; // optionally also assign category
 }
 
 // Überweisung zwischen Konten
@@ -339,6 +386,7 @@ export interface FinanceState {
   savingsGoals: SavingsGoal[];
   budgetLimits: BudgetLimit[];
   accounts: Account[];
+  accountRules: AccountRule[];
   transfers: Transfer[];
   bankConnections: BankConnection[];
   syncSessions: SyncSession[];
@@ -351,6 +399,8 @@ export interface FinanceState {
   settings: Settings;
   selectedMonth: string;
   currentMonth: string;
+  // UX: undo history
+  undoStack: UndoEntry[];
 }
 
 // Nettovermögens-Historie
@@ -384,4 +434,11 @@ export interface CategoryInfo {
   labelDe: string;
   icon: string;
   color: string;
+}
+
+// Undo/Redo support
+export interface UndoEntry {
+  label: string;
+  timestamp: number;
+  patch: Partial<FinanceState>;
 }

@@ -37,6 +37,8 @@ export function AccountsPage() {
   const [type, setType] = useState<AccountType>('checking');
   const [color, setColor] = useState(UI_COLORS[0]);
   const [note, setNote] = useState('');
+  const [billingCycleDay, setBillingCycleDay] = useState('');
+  const [paymentDueDay, setPaymentDueDay] = useState('');
 
   const [fromAccountId, setFromAccountId] = useState('');
   const [toAccountId, setToAccountId] = useState('');
@@ -104,6 +106,8 @@ export function AccountsPage() {
       setType(account.type);
       setColor(account.color);
       setNote(account.note || '');
+      setBillingCycleDay(account.billingCycleDay?.toString() || '');
+      setPaymentDueDay(account.paymentDueDay?.toString() || '');
     } else {
       setEditingAccount(null);
       setName('');
@@ -111,6 +115,8 @@ export function AccountsPage() {
       setType('checking');
       setColor(UI_COLORS[0]);
       setNote('');
+      setBillingCycleDay('');
+      setPaymentDueDay('');
     }
     setAccountModalOpen(true);
   };
@@ -132,6 +138,8 @@ export function AccountsPage() {
       icon: accountTypeInfo.icon,
       isDefault: editingAccount?.isDefault ?? accounts.length === 0,
       note: note || undefined,
+      billingCycleDay: billingCycleDay ? parseInt(billingCycleDay) : undefined,
+      paymentDueDay: paymentDueDay ? parseInt(paymentDueDay) : undefined,
     };
 
     if (editingAccount) {
@@ -382,6 +390,13 @@ export function AccountsPage() {
                           {account.isDefault && <Badge color="#10b981">Standard</Badge>}
                         </div>
                         <p className="mt-1 text-xs text-slate-500 dark:text-gray-500 truncate">{account.note || 'Kein Hinweis hinterlegt'}</p>
+                        {account.type === 'credit' && (account.billingCycleDay || account.paymentDueDay) && (
+                          <p className="mt-0.5 text-xs text-blue-500 dark:text-blue-400">
+                            {account.billingCycleDay && `Abrechnung: ${account.billingCycleDay}.`}
+                            {account.billingCycleDay && account.paymentDueDay && ' · '}
+                            {account.paymentDueDay && `Fällig: ${account.paymentDueDay}.`}
+                          </p>
+                        )}
                       </div>
                     </div>
                     <div className="flex items-center gap-3">
@@ -487,6 +502,12 @@ export function AccountsPage() {
             </div>
           </div>
           <Input label="Notiz (optional)" value={note} onChange={setNote} placeholder="Bank, Zweck oder Kommentar" />
+          {type === 'credit' && (
+            <div className="grid grid-cols-2 gap-3">
+              <Input label="Abrechnungstag" type="number" value={billingCycleDay} onChange={setBillingCycleDay} placeholder="z.B. 15" />
+              <Input label="Fälligkeitstag" type="number" value={paymentDueDay} onChange={setPaymentDueDay} placeholder="z.B. 1" />
+            </div>
+          )}
           <div className="flex gap-3 pt-2">
             <Button variant="secondary" onClick={closeAccountModal} className="flex-1">Abbrechen</Button>
             <Button onClick={handleSaveAccount} className="flex-1">{editingAccount ? 'Speichern' : 'Anlegen'}</Button>

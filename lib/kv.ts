@@ -1,5 +1,5 @@
 import { kv } from '@vercel/kv';
-import type { FinanceState, Income, FixedExpense, Expense, Debt, SavingsGoal, BudgetLimit, Account, Transfer, BankConnection, SyncSession, FreelanceProject, WorkSession, FreelanceInvoice, NetWorthSnapshot, AppNotification } from '@/src/types';
+import type { FinanceState, Income, FixedExpense, Expense, Debt, SavingsGoal, BudgetLimit, Account, AccountRule, Transfer, BankConnection, SyncSession, FreelanceProject, WorkSession, FreelanceInvoice, NetWorthSnapshot, AppNotification } from '@/src/types';
 import { DEFAULT_SETTINGS } from '@/src/utils/constants';
 import { getCurrentMonth } from '@/src/utils/helpers';
 
@@ -83,6 +83,7 @@ export async function getFullState(userId: string): Promise<FinanceState> {
     selectedMonth,
     netWorthHistory,
     notifications,
+    accountRules,
   ] = await Promise.all([
     getEntities<Income>(userId, 'incomes'),
     getEntities<FixedExpense>(userId, 'fixedExpenses'),
@@ -102,6 +103,7 @@ export async function getFullState(userId: string): Promise<FinanceState> {
     kv.get<string>(userKey(userId, 'selectedMonth')),
     kv.get<NetWorthSnapshot[]>(userKey(userId, 'netWorthHistory')),
     kv.get<AppNotification[]>(userKey(userId, 'notifications')),
+    kv.get<AccountRule[]>(userKey(userId, 'accountRules')),
   ]);
 
   const month = selectedMonth || getCurrentMonth();
@@ -126,6 +128,8 @@ export async function getFullState(userId: string): Promise<FinanceState> {
     currentMonth: month,
     netWorthHistory: netWorthHistory || [],
     notifications: notifications || [],
+    accountRules: accountRules || [],
+    undoStack: [],
   };
 }
 
@@ -149,5 +153,6 @@ export async function saveFullState(userId: string, state: FinanceState): Promis
     kv.set(userKey(userId, 'selectedMonth'), state.selectedMonth),
     kv.set(userKey(userId, 'netWorthHistory'), state.netWorthHistory),
     kv.set(userKey(userId, 'notifications'), state.notifications),
+    kv.set(userKey(userId, 'accountRules'), state.accountRules || []),
   ]);
 }

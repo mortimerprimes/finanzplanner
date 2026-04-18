@@ -131,6 +131,28 @@ export function FreelancePage() {
     }, 0);
   }, [uninvoicedSessions, freelanceProjects]);
 
+  // Overdue invoices (issued but not paid, older than 30 days)
+  const overdueInvoices = useMemo(() => {
+    const thirtyDaysAgo = new Date();
+    thirtyDaysAgo.setDate(thirtyDaysAgo.getDate() - 30);
+    return freelanceInvoices.filter(inv =>
+      inv.status === 'issued' && new Date(inv.issueDate) < thirtyDaysAgo
+    );
+  }, [freelanceInvoices]);
+
+  // Effective hourly rate per project
+  const projectProfitability = useMemo(() => {
+    return freelanceProjects.map(project => {
+      const sessions = workSessions.filter(s => s.projectId === project.id);
+      const totalHours = sessions.reduce((s, sess) => s + calculateSessionHours(sess), 0);
+      const totalEarned = freelanceInvoices
+        .filter(inv => inv.projectId === project.id && (inv.status === 'paid' || inv.status === 'issued'))
+        .reduce((s, inv) => s + inv.netAmount, 0);
+      const effectiveRate = totalHours > 0 ? totalEarned / totalHours : project.hourlyRate;
+      return { project, totalHours, totalEarned, effectiveRate };
+    });
+  }, [freelanceProjects, workSessions, freelanceInvoices]);
+
   const invoiceCandidates = useMemo(() => {
     if (!invoiceProjectId) return [];
     return workSessions.filter(
@@ -501,6 +523,48 @@ export function FreelancePage() {
         <StatCard title="Offen fakturierbar" value={formatCurrency(unbilledRevenue, settings)} icon="Wallet" iconColor="#f59e0b" iconBg="bg-amber-50 dark:bg-amber-950/40" />
         <StatCard title="Rechnungen gesamt" value={String(freelanceInvoices.length)} icon="ReceiptText" iconColor="#8b5cf6" iconBg="bg-violet-50 dark:bg-violet-950/40" />
       </div>
+
+      {/* Overdue invoice warnings */}
+      {overdueInvoices.length > 0 && (
+        <Card className="border-red-200 bg-red-50 p-4 dark:border-red-800 dark:bg-red-950/20">
+          <h3 className="text-sm font-bold text-red-700 dark:text-red-400 mb-2">⚠ Überfällige Rechnungen ({overdueInvoices.length})</h3>
+          <div className="space-y-2">
+            {overdueInvoices.map(inv => {
+              const project = freelanceProjects.find(p => p.id === inv.projectId);
+              const daysSince = Math.floor((Date.now() - new Date(inv.issueDate).getTime()) / 86400000);
+              return (
+                <div key={inv.id} className="flex items-center justify-between text-sm">
+                  <span className="text-red-600 dark:text-red-300">{inv.invoiceNumber} · {project?.clientName || 'Unbekannt'}</span>
+                  <span className="font-semibold text-red-700 dark:text-red-400">{formatCurrency(inv.grossAmount, settings)} · {daysSince} Tage</span>
+                </div>
+              );
+            })}
+          </div>
+        </Card>
+      )}
+
+      {/* Project profitability */}
+      {projectProfitability.length > 0 && (
+        <Card className="p-5">
+          <h3 className="text-base font-semibold text-gray-900 dark:text-white mb-3">Projekt-Profitabilität</h3>
+          <div className="space-y-2">
+            {projectProfitability.map(({ project, totalHours, totalEarned, effectiveRate }) => (
+              <div key={project.id} className="flex items-center justify-between gap-3 rounded-xl bg-slate-50 p-3 dark:bg-gray-800/50">
+                <div className="min-w-0">
+                  <p className="text-sm font-medium text-gray-900 dark:text-white truncate">{project.name}</p>
+                  <p className="text-xs text-slate-500 dark:text-gray-500">{totalHours.toFixed(1)}h · {formatCurrency(totalEarned, settings)} Umsatz</p>
+                </div>
+                <div className="text-right">
+                  <p className={`text-sm font-bold ${effectiveRate >= project.hourlyRate ? 'text-emerald-600 dark:text-emerald-400' : 'text-red-600 dark:text-red-400'}`}>
+                    {formatCurrency(effectiveRate, settings)}/h
+                  </p>
+                  <p className="text-xs text-slate-500 dark:text-gray-500">Soll: {formatCurrency(project.hourlyRate, settings)}/h</p>
+                </div>
+              </div>
+            ))}
+          </div>
+        </Card>
+      )}
 
       <Card className="p-5">
         <div className="mb-3 flex items-center justify-between gap-3">

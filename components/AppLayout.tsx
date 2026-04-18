@@ -17,6 +17,8 @@ import { Modal } from '@/src/components/ui';
 import { QuickCaptureFab } from '@/src/components/QuickCaptureFab';
 import { NotificationBell } from '@/components/NotificationBell';
 import { useNotificationEngine } from '@/src/hooks/useNotifications';
+import { GlobalSearch } from '@/src/components/GlobalSearch';
+import { useKeyboardShortcuts, KeyboardShortcutsHelp } from '@/src/hooks/useKeyboardShortcuts';
 
 const navItems = [
   { href: '/dashboard', label: 'Dashboard', icon: LayoutDashboard },
@@ -46,6 +48,16 @@ export function AppLayout({ children }: { children: React.ReactNode }) {
 
   // Run notification engine
   useNotificationEngine();
+  // Keyboard shortcuts
+  useKeyboardShortcuts();
+  const [shortcutsOpen, setShortcutsOpen] = useState(false);
+
+  // Listen for shortcuts help
+  useState(() => {
+    const handler = () => setShortcutsOpen(true);
+    window.addEventListener('show-shortcuts', handler);
+    return () => window.removeEventListener('show-shortcuts', handler);
+  });
 
   const handlePrevMonth = () => {
     const [year, month] = state.selectedMonth.split('-').map(Number);
@@ -229,7 +241,8 @@ export function AppLayout({ children }: { children: React.ReactNode }) {
               </button>
             </div>
           )}
-          <div className={`${isSettingsPage ? 'ml-auto' : ''} flex-shrink-0 hidden lg:block`}>
+          <div className={`${isSettingsPage ? 'ml-auto' : ''} flex flex-shrink-0 items-center gap-2 hidden lg:flex`}>
+            <GlobalSearch />
             <NotificationBell />
           </div>
         </header>
@@ -297,6 +310,7 @@ export function AppLayout({ children }: { children: React.ReactNode }) {
       </Modal>
 
       {!isSettingsPage && <QuickCaptureFab />}
+      <KeyboardShortcutsHelp isOpen={shortcutsOpen} onClose={() => setShortcutsOpen(false)} />
     </div>
   );
 }

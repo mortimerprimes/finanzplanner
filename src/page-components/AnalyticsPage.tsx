@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useMemo } from 'react';
 import { ArrowDownRight, ArrowUpRight, BrainCircuit, Sparkles, TrendingUp } from 'lucide-react';
 import { Area, AreaChart, Bar, BarChart, CartesianGrid, Cell, Pie, PieChart, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts';
 import { useFinance } from '@/lib/finance-context';
@@ -159,6 +159,31 @@ export function AnalyticsPage() {
         : [...currentIds, debtId]
     ));
   };
+
+  // Expense heatmap (last 90 days)
+  const heatmapData = useMemo(() => {
+    const today = new Date();
+    const days: { date: string; amount: number; dayOfWeek: number; week: number }[] = [];
+    for (let i = 89; i >= 0; i--) {
+      const d = new Date(today);
+      d.setDate(d.getDate() - i);
+      const dateStr = d.toISOString().slice(0, 10);
+      const dayExpenses = expenses.filter(e => e.date === dateStr).reduce((s, e) => s + e.amount, 0);
+      days.push({ date: dateStr, amount: dayExpenses, dayOfWeek: d.getDay(), week: Math.floor((89 - i) / 7) });
+    }
+    return days;
+  }, [expenses]);
+  const heatmapMax = Math.max(...heatmapData.map(d => d.amount), 1);
+
+  // Category trend (last 6 months)
+  const categoryTrendData = useMemo(() => {
+    const months6 = getPreviousMonths(6, selectedMonth);
+    const allCats = [...new Set(expenses.filter(e => months6.includes(e.month)).map(e => e.category))];
+    return { months: months6.map(m => ({
+      label: getShortMonthName(m),
+      ...Object.fromEntries(allCats.map(cat => [cat, expenses.filter(e => e.month === m && e.category === cat).reduce((s, e) => s + e.amount, 0)]))
+    })), categories: allCats };
+  }, [expenses, selectedMonth]);
 
   const insights = [
     {
@@ -533,6 +558,73 @@ export function AnalyticsPage() {
 
       {/* Net Worth History */}
       <NetWorthHistory />
+
+      {/* Expense Heatmap */}
+      <Card className="p-5">
+        <h3 className="mb-4 text-base font-semibold text-gray-900 dark:text-white">Ausgaben-Heatmap (90 Tage)</h3>
+        <div className="overflow-x-auto">
+          <div className="flex gap-0.5" style={{ minWidth: '650px' }}>
+            {Array.from({ length: 13 }, (_, week) => (
+              <div key={week} className="flex flex-col gap-0.5">
+                {Array.from({ length: 7 }, (_, day) => {
+                  const idx = week * 7 + day;
+                  const cell = heatmapData[idx];
+                  if (!cell) return <div key={day} className="h-3.5 w-3.5" />;
+                  const intensity = cell.amount / heatmapMax;
+                  const bg = cell.amount === 0
+                    ? 'bg-slate-100 dark:bg-gray-800'
+                    : intensity < 0.25 ? 'bg-red-100 dark:bg-red-950/30'
+                    : intensity < 0.5 ? 'bg-red-200 dark:bg-red-900/40'
+                    : intensity < 0.75 ? 'bg-red-300 dark:bg-red-800/50'
+                    : 'bg-red-500 dark:bg-red-600';
+                  return (
+                    <div
+                      key={day}
+                      className={`h-3.5 w-3.5 rounded-sm ${bg} transition-colors`}
+                      title={`${cell.date}: ${formatCurrency(cell.amount, settings)}`}
+                    />
+                  );
+                })}
+              </div>
+            ))}
+          </div>
+          <div className="mt-2 flex items-center gap-2 text-xs text-slate-500 dark:text-gray-500">
+            <span>Wenig</span>
+            <div className="flex gap-0.5">
+              <div className="h-3 w-3 rounded-sm bg-slate-100 dark:bg-gray-800" />
+              <div className="h-3 w-3 rounded-sm bg-red-100 dark:bg-red-950/30" />
+              <div className="h-3 w-3 rounded-sm bg-red-200 dark:bg-red-900/40" />
+              <div className="h-3 w-3 rounded-sm bg-red-300 dark:bg-red-800/50" />
+              <div className="h-3 w-3 rounded-sm bg-red-500 dark:bg-red-600" />
+            </div>
+            <span>Viel</span>
+          </div>
+        </div>
+      </Card>
+
+      {/* Category Trends */}
+      {categoryTrendData.categories.length > 0 && (
+        <Card className="p-5">
+          <h3 className="mb-4 text-base font-semibold text-gray-900 dark:text-white">Kategorie-Trends (6 Monate)</h3>
+          <div className="h-64">
+            <ResponsiveContainer width="100%" height="100%">
+              <BarChart data={categoryTrendData.months}>
+                <CartesianGrid strokeDasharray="3 3" stroke={resolvedTheme === 'dark' ? '#374151' : '#e2e8f0'} />
+                <XAxis dataKey="label" tick={{ fontSize: 12, fill: resolvedTheme === 'dark' ? '#9ca3af' : '#64748b' }} />
+                <YAxis tick={{ fontSize: 12, fill: resolvedTheme === 'dark' ? '#9ca3af' : '#64748b' }} />
+                <Tooltip
+                  contentStyle={{ backgroundColor: resolvedTheme === 'dark' ? '#1f2937' : '#ffffff', border: 'none', borderRadius: 12, fontSize: 12 }}
+                  formatter={(value: unknown) => formatCurrency(Number(value), settings)}
+                />
+                {categoryTrendData.categories.slice(0, 8).map((cat, i) => {
+                  const info = getExpenseCategoryInfo(cat, settings);
+                  return <Bar key={cat} dataKey={cat} stackId="a" fill={info.color} name={info.labelDe} radius={i === categoryTrendData.categories.length - 1 ? [4, 4, 0, 0] : undefined} />;
+                })}
+              </BarChart>
+            </ResponsiveContainer>
+          </div>
+        </Card>
+      )}
     </div>
   );
 }
