@@ -46,6 +46,10 @@ export function Dashboard() {
     freelanceInvoices
   );
   const totalSpent = summary.totalFixedExpenses + summary.totalDebtPayments + summary.totalVariableExpenses;
+  const monthNetFlow = summary.totalIncome - totalSpent;
+  const spentRatioOfIncome = summary.totalIncome > 0
+    ? (totalSpent / summary.totalIncome) * 100
+    : totalSpent > 0 ? 100 : 0;
   const netWorth = calculateNetWorth(accounts, debts);
   const totalAccountBalance = accounts.reduce((sum, account) => sum + account.balance, 0);
   const liquidBalance = accounts
@@ -560,6 +564,89 @@ export function Dashboard() {
                   ? `Von deinem aktuellen Kontostand sind ${formatCurrency(freeAvailable, settings)} in diesem Monat frei verfügbar. ${totalBudgetLimit > 0 ? `${formatCurrency(reservedBudget, settings)} bleiben dabei als Budget-Reserve eingeplant.` : 'Setze Budgets, damit deine Reserve noch genauer geplant wird.'}`
                   : 'Lege Konten an, damit dein Dashboard Kontostand, Liquidität und Nettovermögen automatisch zusammenfasst.'}
               </p>
+            </div>
+
+            <div className="rounded-3xl border border-white/10 bg-white/8 p-4 backdrop-blur">
+              <div className="flex flex-wrap items-center justify-between gap-3">
+                <div>
+                  <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-cyan-200/80">Monatsfluss</p>
+                  <p className="mt-1 text-lg font-semibold text-white">Einnahmen und Ausgaben auf einen Blick</p>
+                </div>
+                <div className={`inline-flex items-center gap-2 rounded-full px-3 py-1 text-xs font-semibold ${monthNetFlow >= 0 ? 'bg-emerald-400/15 text-emerald-100' : 'bg-red-400/15 text-red-100'}`}>
+                  <Icon name={monthNetFlow >= 0 ? 'TrendingUp' : 'AlertTriangle'} size={14} />
+                  {monthNetFlow >= 0 ? 'Aktuell im Plus' : 'Aktuell im Minus'}
+                </div>
+              </div>
+
+              <div className="mt-4 grid grid-cols-1 gap-3 md:grid-cols-3">
+                {[
+                  {
+                    label: 'Einnahmen',
+                    value: formatCurrency(summary.totalIncome, settings),
+                    sublabel: plannedFreelanceIncome.total > 0 ? `+ ${formatCurrency(plannedFreelanceIncome.total, settings)} geplant` : 'Bereits verbucht',
+                    href: '/income',
+                    icon: 'TrendingUp',
+                    tone: 'border-emerald-400/20 bg-emerald-400/10',
+                    iconTone: 'text-emerald-200',
+                  },
+                  {
+                    label: 'Ausgaben',
+                    value: formatCurrency(totalSpent, settings),
+                    sublabel: `${formatCurrency(summary.totalFixedExpenses, settings)} fix · ${formatCurrency(summary.totalVariableExpenses, settings)} variabel${summary.totalDebtPayments > 0 ? ` · ${formatCurrency(summary.totalDebtPayments, settings)} Raten` : ''}`,
+                    href: '/expenses',
+                    icon: 'Receipt',
+                    tone: 'border-amber-400/20 bg-amber-400/10',
+                    iconTone: 'text-amber-200',
+                  },
+                  {
+                    label: 'Saldo',
+                    value: formatCurrency(monthNetFlow, settings),
+                    sublabel: monthNetFlow >= 0 ? 'Einnahmen minus Ausgaben' : 'Mehr ausgegeben als eingenommen',
+                    href: '/analytics',
+                    icon: 'Scale',
+                    tone: monthNetFlow >= 0 ? 'border-cyan-400/20 bg-cyan-400/10' : 'border-red-400/20 bg-red-400/10',
+                    iconTone: monthNetFlow >= 0 ? 'text-cyan-200' : 'text-red-200',
+                  },
+                ].map((item) => (
+                  <button
+                    key={item.label}
+                    onClick={() => router.push(item.href)}
+                    className={`rounded-2xl border p-4 text-left transition-all hover:border-white/30 hover:bg-white/12 ${item.tone}`}
+                  >
+                    <div className="flex items-start justify-between gap-3">
+                      <div>
+                        <p className="text-xs font-medium text-white/70">{item.label}</p>
+                        <p className="mt-2 text-2xl font-semibold text-white">{item.value}</p>
+                      </div>
+                      <div className="rounded-2xl bg-white/10 p-2.5">
+                        <Icon name={item.icon} size={16} className={item.iconTone} />
+                      </div>
+                    </div>
+                    <p className="mt-2 text-xs text-white/65">{item.sublabel}</p>
+                  </button>
+                ))}
+              </div>
+
+              <div className="mt-4 rounded-2xl border border-white/10 bg-slate-950/20 p-3">
+                <div className="flex flex-wrap items-center justify-between gap-2 text-xs text-slate-300">
+                  <span>Ausgabenquote</span>
+                  <span>
+                    {summary.totalIncome > 0
+                      ? `${spentRatioOfIncome.toFixed(0)}% deiner Einnahmen bereits ausgegeben`
+                      : totalSpent > 0
+                        ? 'Ausgaben vorhanden, aber noch keine Einnahmen erfasst'
+                        : 'Noch keine Einnahmen oder Ausgaben in diesem Monat'}
+                  </span>
+                </div>
+                <div className="mt-2">
+                  <ProgressBar
+                    value={Math.min(spentRatioOfIncome, 100)}
+                    max={100}
+                    color={getProgressColor(Math.min(spentRatioOfIncome, 100))}
+                    size="md"
+                  />
+                </div>
+              </div>
             </div>
 
             <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-4">
