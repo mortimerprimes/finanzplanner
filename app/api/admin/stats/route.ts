@@ -1,6 +1,5 @@
 import { NextResponse } from 'next/server';
-import { requireAdmin, listAllUsers } from '@/lib/admin';
-import { kv } from '@vercel/kv';
+import { requireAdmin, listAllUsers, getDailyRegistrations, getTotalDataEntries, getSystemKeyStats } from '@/lib/admin';
 
 export async function GET() {
   try {
@@ -9,23 +8,33 @@ export async function GET() {
       return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
     }
 
-    const users = await listAllUsers();
-    const userCount = await kv.get<number>('auth:user_count') ?? users.length;
+    const [users, dailyRegistrations, totalDataEntries, systemKeys] = await Promise.all([
+      listAllUsers(),
+      getDailyRegistrations(30),
+      getTotalDataEntries(),
+      getSystemKeyStats(),
+    ]);
 
     const adminCount = users.filter(u => u.role === 'admin').length;
     const lockedCount = users.filter(u => u.isLocked).length;
+    const sortedByDate = [...users].sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
 
-    // Check rate limits
-    const rateLimitKeys: string[] = await kv.keys('ratelimit:login:*');
+    // Week-over-week growth
+    const thisWeek = dailyRegistrations.slice(-7).reduce((s, d) => s + d.count, 0);
+    const lastWeek = dailyRegistrations.slice(-14, -7).reduce((s, d) => s + d.count, 0);
 
     return NextResponse.json({
-      totalUsers: userCount,
+      totalUsers: users.length,
       adminCount,
       lockedCount,
-      activeRateLimits: rateLimitKeys.length,
-      newestUser: users.length > 0
-        ? users.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime())[0]
-        : null,
+      activeRateLimits: systemKeys.rateLimitKeys,
+      totalDataEntries,
+      dailyRegistrations,
+      thisWeekRegistrations: thisWeek,
+      lastWeekRegistrations: lastWeek,
+      newestUser: sortedByDate[0] ?? null,
+      recentUsers: sortedByDate.slice(0, 5),
+      systemKeys,
     });
   } catch (err) {
     console.error('[API/admin/stats] GET error:', err);

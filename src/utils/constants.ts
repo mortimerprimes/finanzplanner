@@ -116,6 +116,7 @@ export const DEFAULT_SETTINGS = {
     billReminders: true,
     savingsGoals: true,
   },
+  hiddenMenuItems: [],
 };
 
 // Available Currencies

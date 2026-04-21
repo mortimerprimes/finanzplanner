@@ -14,6 +14,24 @@ export interface Income {
   date?: string;
   month?: string;
   note?: string;
+  accountId?: string;
+  affectsAccountBalance?: boolean;
+  createdAt: string;
+  /** Month from which this recurring income is effective (YYYY-MM). Recurring incomes before this month are excluded. */
+  startMonth?: string;
+  /** For future planning: month from which this income will take effect */
+  effectiveFromMonth?: string;
+}
+
+// Planned future income for forecasting
+export interface PlannedIncome {
+  id: string;
+  name: string;
+  amount: number;
+  type: IncomeType;
+  startMonth: string; // "2026-10" - when this income begins
+  isRecurring: boolean;
+  note?: string;
   createdAt: string;
 }
 
@@ -36,7 +54,10 @@ export interface FixedExpense {
   dueDay: number; // 1-31
   isActive: boolean;
   note?: string;
+  accountId?: string;
   createdAt: string;
+  /** Optional link to a debt — auto-booking this expense also reduces the debt */
+  linkedDebtId?: string;
 }
 
 // Schulden (Debts)
@@ -142,6 +163,8 @@ export interface Expense {
   category: ExpenseCategory;
   date: string; // ISO date string
   accountId?: string;
+  linkedDebtId?: string;
+  affectsAccountBalance?: boolean;
   isRecurring?: boolean;
   month: string; // "2026-04"
   tags?: string[];
@@ -152,6 +175,9 @@ export interface Expense {
   splits?: ExpenseSplit[];
   // Planned (future) expense, not yet booked
   isPlanned?: boolean;
+  // Auto-booking: links back to the source fixed expense or recurring income
+  autoBookedFromId?: string;
+  autoBookedType?: 'fixedExpense' | 'recurringIncome';
 }
 
 // Split transaction: one expense → multiple categories
@@ -280,6 +306,14 @@ export interface Settings {
     billReminders: boolean;
     savingsGoals: boolean;
   };
+  // Freelance earning limit (yearly tax threshold)
+  freelanceYearlyLimit?: number;
+  freelanceYearlyLimitYear?: string; // e.g. "2026" - which year the limit applies to
+  // Email report
+  reportEmail?: string;
+  emailReportFrequency?: 'none' | 'weekly' | 'monthly';
+  // Sidebar menu visibility - hrefs of hidden menu items
+  hiddenMenuItems?: string[];
 }
 
 // Bank Sync
@@ -377,6 +411,41 @@ export interface FreelanceInvoice {
   createdAt: string;
 }
 
+// Auto-Booking: tracks which recurring items have been booked for which month
+export interface AutoBooking {
+  id: string;
+  month: string; // "2026-04"
+  sourceType: 'fixedExpense' | 'recurringIncome';
+  sourceId: string;
+  bookedExpenseId?: string;
+  bookedIncomeId?: string;
+  accountId?: string;
+  debtPaymentApplied?: boolean;
+  linkedDebtId?: string;
+  amount: number;
+  createdAt: string;
+}
+
+// Month-End Close: tracks wizard completion per month
+export interface MonthClose {
+  id: string;
+  month: string;
+  completedAt: string;
+  autoBookingConfirmed: boolean;
+  savingsAllocated: boolean;
+  budgetRolloverConfirmed: boolean;
+  savingsAllocations: { goalId: string; amount: number }[];
+  budgetRollovers: { budgetId: string; rolloverAmount: number }[];
+  summary: {
+    totalIncome: number;
+    totalFixedExpenses: number;
+    totalVariableExpenses: number;
+    totalDebtPayments: number;
+    totalSaved: number;
+    remaining: number;
+  };
+}
+
 // App State
 export interface FinanceState {
   incomes: Income[];
@@ -399,8 +468,18 @@ export interface FinanceState {
   settings: Settings;
   selectedMonth: string;
   currentMonth: string;
+  // Planned future incomes for forecasting
+  plannedIncomes: PlannedIncome[];
   // UX: undo history
   undoStack: UndoEntry[];
+  // Activity log
+  activityLog: ActivityLogEntry[];
+  // Category auto-rules
+  categoryRules: CategoryRule[];
+  // Auto-booking tracking
+  autoBookings: AutoBooking[];
+  // Month-end wizard tracking
+  monthCloses: MonthClose[];
 }
 
 // Nettovermögens-Historie
@@ -441,4 +520,29 @@ export interface UndoEntry {
   label: string;
   timestamp: number;
   patch: Partial<FinanceState>;
+}
+
+// Activity Log
+export type ActivityAction = 'create' | 'update' | 'delete' | 'import' | 'payment' | 'transfer';
+export type ActivityEntity = 'income' | 'fixedExpense' | 'expense' | 'debt' | 'savingsGoal' | 'budgetLimit' | 'account' | 'transfer' | 'freelanceProject' | 'workSession' | 'freelanceInvoice' | 'settings' | 'bankSync' | 'other';
+
+export interface ActivityLogEntry {
+  id: string;
+  action: ActivityAction;
+  entity: ActivityEntity;
+  entityId?: string;
+  label: string;
+  details?: string;
+  amount?: number;
+  createdAt: string;
+}
+
+// Category Rules (auto-categorization)
+export interface CategoryRule {
+  id: string;
+  keyword: string; // e.g. "REWE", "Amazon"
+  category: ExpenseCategory;
+  matchType: 'contains' | 'startsWith' | 'exact';
+  isActive: boolean;
+  createdAt: string;
 }

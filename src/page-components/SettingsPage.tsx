@@ -1,5 +1,7 @@
+'use client';
+
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import { Bot, Check, Download, Eye, EyeOff, LoaderCircle, Mic, PlugZap, ReceiptText, RotateCcw, ShieldCheck, Upload } from 'lucide-react';
+import { Bot, Check, Download, Eye, EyeOff, LoaderCircle, Menu, Mic, PlugZap, ReceiptText, RotateCcw, ShieldCheck, Upload } from 'lucide-react';
 import * as XLSX from 'xlsx';
 import jsPDF from 'jspdf';
 import autoTable from 'jspdf-autotable';
@@ -445,6 +447,10 @@ export function SettingsPage() {
         </div>
       </div>
 
+      <div className="rounded-2xl border border-blue-200 bg-blue-50/80 px-4 py-3 text-sm text-blue-900 dark:border-blue-900/60 dark:bg-blue-950/20 dark:text-blue-100">
+        Deine App-Konfiguration wird automatisch gespeichert: Theme, Widgets, Navigation, AI-Provider, API-Key, Backup-Ziele und weitere Einstellungen werden deinem Konto zugeordnet und zusätzlich lokal auf diesem Gerät zwischengespeichert.
+      </div>
+
       {showSuccess && (
         <div className="flex items-center gap-2 rounded-2xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm font-medium text-emerald-700 dark:border-emerald-900 dark:bg-emerald-950/30 dark:text-emerald-400">
           <Check size={16} />
@@ -510,6 +516,20 @@ export function SettingsPage() {
             <SettingSwitch title="Cent-Beträge anzeigen" description={`Aktuelle Vorschau: ${formatCurrency(1234.56, settings)}`} checked={settings.showCents} onChange={(value) => updateSetting('showCents', value)} />
             <SettingSwitch title="Quick Entry aktivieren" description="Floating Action Button, Schnellerfassung und gemerkte Standardwerte." checked={settings.quickEntry} onChange={(value) => updateSetting('quickEntry', value)} />
           </div>
+
+          <div className="mt-4">
+            <h4 className="text-xs font-bold uppercase tracking-wide text-slate-400 dark:text-gray-500 mb-3">Freelance</h4>
+            <Input
+              label="Jährliche Verdienstgrenze (€)"
+              type="number"
+              value={settings.freelanceYearlyLimit ? String(settings.freelanceYearlyLimit) : ''}
+              onChange={(value) => updateSetting('freelanceYearlyLimit', value ? Number(value) : 0)}
+              placeholder="z.B. 11000 (Kleinunternehmergrenze)"
+            />
+            <p className="text-xs text-slate-500 dark:text-gray-400 mt-1">
+              Bei Erreichen der Grenze wirst du auf der Freelance-Seite gewarnt. Leer lassen = keine Warnung.
+            </p>
+          </div>
         </Card>
 
         <Card className="p-5">
@@ -539,6 +559,116 @@ export function SettingsPage() {
           </div>
         </Card>
       </div>
+
+      <Card className="p-5">
+        <h3 className="mb-4 flex items-center gap-2 text-sm font-bold text-gray-900 dark:text-white">
+          <Menu size={16} className="text-indigo-500" /> Menü-Sichtbarkeit
+        </h3>
+        <p className="mb-4 text-sm text-slate-500 dark:text-gray-500">
+          Blende Menüpunkte aus, die du nicht brauchst, um die Navigation übersichtlicher zu gestalten. Dashboard und Einstellungen bleiben immer sichtbar.
+        </p>
+        <div className="space-y-4">
+          {[
+            {
+              group: 'Übersicht',
+              items: [
+                { href: '/analytics', label: 'Analysen' },
+                { href: '/cashflow', label: 'Cashflow' },
+              ],
+            },
+            {
+              group: 'Finanzen',
+              items: [
+                { href: '/income', label: 'Einnahmen' },
+                { href: '/fixed-expenses', label: 'Fixkosten' },
+                { href: '/debts', label: 'Schulden' },
+                { href: '/expenses', label: 'Ausgaben' },
+                { href: '/budget', label: 'Budgets' },
+              ],
+            },
+            {
+              group: 'Vermögen',
+              items: [
+                { href: '/savings', label: 'Sparziele' },
+                { href: '/accounts', label: 'Konten' },
+                { href: '/freelance', label: 'Freelance' },
+              ],
+            },
+            {
+              group: 'Berichte',
+              items: [
+                { href: '/annual-report', label: 'Jahresbericht' },
+                { href: '/finance-score', label: 'Finanz-Score' },
+                { href: '/finance-goals', label: 'Finanz-Ziele' },
+              ],
+            },
+            {
+              group: 'Tools',
+              items: [
+                { href: '/bank-sync', label: 'Bank Sync' },
+                { href: '/receipts', label: 'Belege' },
+                { href: '/category-rules', label: 'Regeln' },
+                { href: '/activity-log', label: 'Aktivitäten' },
+              ],
+            },
+          ].map((section) => {
+            const hiddenItems = settings.hiddenMenuItems || [];
+            const allHidden = section.items.every(item => hiddenItems.includes(item.href));
+            const noneHidden = section.items.every(item => !hiddenItems.includes(item.href));
+            return (
+              <div key={section.group} className="rounded-2xl border border-slate-200 p-4 dark:border-gray-800">
+                <div className="flex items-center justify-between mb-3">
+                  <p className="text-sm font-semibold text-gray-900 dark:text-white">{section.group}</p>
+                  <button
+                    onClick={() => {
+                      if (noneHidden) {
+                        updateSetting('hiddenMenuItems', [...hiddenItems, ...section.items.map(i => i.href)]);
+                      } else {
+                        updateSetting('hiddenMenuItems', hiddenItems.filter(h => !section.items.some(i => i.href === h)));
+                      }
+                    }}
+                    className="text-xs font-medium text-blue-600 dark:text-blue-400 hover:underline"
+                  >
+                    {noneHidden ? 'Alle ausblenden' : 'Alle einblenden'}
+                  </button>
+                </div>
+                <div className="flex flex-wrap gap-2">
+                  {section.items.map((item) => {
+                    const isHidden = hiddenItems.includes(item.href);
+                    return (
+                      <button
+                        key={item.href}
+                        onClick={() => {
+                          if (isHidden) {
+                            updateSetting('hiddenMenuItems', hiddenItems.filter(h => h !== item.href));
+                          } else {
+                            updateSetting('hiddenMenuItems', [...hiddenItems, item.href]);
+                          }
+                        }}
+                        className={`rounded-xl border px-3 py-2 text-xs font-medium transition-all ${
+                          isHidden
+                            ? 'border-slate-200 bg-slate-50 text-slate-400 dark:border-gray-800 dark:bg-gray-900 dark:text-gray-600 line-through'
+                            : 'border-blue-300 bg-blue-50 text-blue-700 dark:border-blue-700 dark:bg-blue-950/30 dark:text-blue-300'
+                        }`}
+                      >
+                        {item.label}
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+            );
+          })}
+        </div>
+        {(settings.hiddenMenuItems || []).length > 0 && (
+          <button
+            onClick={() => updateSetting('hiddenMenuItems', [])}
+            className="mt-4 text-xs font-medium text-slate-500 dark:text-gray-500 hover:text-red-500 dark:hover:text-red-400 transition-colors"
+          >
+            Alle Menüpunkte wieder einblenden
+          </button>
+        )}
+      </Card>
 
       <Card className="p-5">
         <h3 className="mb-4 flex items-center gap-2 text-sm font-bold text-gray-900 dark:text-white">
@@ -841,6 +971,28 @@ export function SettingsPage() {
             <SettingSwitch title="Budget-Warnungen" description="Meldet frühzeitig, wenn dein Monatsbudget knapp wird." checked={settings.notifications.budgetWarnings} onChange={(value) => updateNotification('budgetWarnings', value)} />
             <SettingSwitch title="Rechnungs-Erinnerungen" description="Praktisch für Fixkosten und Fälligkeitstage." checked={settings.notifications.billReminders} onChange={(value) => updateNotification('billReminders', value)} />
             <SettingSwitch title="Sparziel-Impulse" description="Benachrichtigt bei Meilensteinen und Rückstand." checked={settings.notifications.savingsGoals} onChange={(value) => updateNotification('savingsGoals', value)} />
+          </div>
+        </Card>
+
+        <Card className="p-5">
+          <h3 className="mb-4 flex items-center gap-2 text-sm font-bold text-gray-900 dark:text-white">
+            <Icon name="Mail" size={16} className="text-blue-500" /> Berichte per E-Mail
+          </h3>
+          <div className="space-y-3">
+            <Input label="E-Mail-Adresse" value={settings.reportEmail || ''} onChange={(v) => updateSetting('reportEmail', v)} placeholder="deine@email.de" icon="Mail" />
+            <Select
+              label="Berichtsfrequenz"
+              value={settings.emailReportFrequency || 'none'}
+              onChange={(v) => updateSetting('emailReportFrequency', v as 'none' | 'weekly' | 'monthly')}
+              options={[
+                { value: 'none', label: 'Kein automatischer Bericht' },
+                { value: 'weekly', label: 'Wöchentlich' },
+                { value: 'monthly', label: 'Monatlich' },
+              ]}
+            />
+            <p className="text-xs text-slate-500 dark:text-gray-500">
+              Beim Monatsabschluss-Wizard kannst du die Zusammenfassung direkt per E-Mail versenden oder kopieren.
+            </p>
           </div>
         </Card>
       </div>

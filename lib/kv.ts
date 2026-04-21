@@ -1,5 +1,5 @@
 import { kv } from '@vercel/kv';
-import type { FinanceState, Income, FixedExpense, Expense, Debt, SavingsGoal, BudgetLimit, Account, AccountRule, Transfer, BankConnection, SyncSession, FreelanceProject, WorkSession, FreelanceInvoice, NetWorthSnapshot, AppNotification } from '@/src/types';
+import type { FinanceState, Income, FixedExpense, Expense, Debt, SavingsGoal, BudgetLimit, Account, AccountRule, Transfer, BankConnection, SyncSession, FreelanceProject, WorkSession, FreelanceInvoice, NetWorthSnapshot, AppNotification, ActivityLogEntry, CategoryRule, PlannedIncome, AutoBooking, MonthClose } from '@/src/types';
 import { DEFAULT_SETTINGS } from '@/src/utils/constants';
 import { getCurrentMonth } from '@/src/utils/helpers';
 
@@ -84,6 +84,11 @@ export async function getFullState(userId: string): Promise<FinanceState> {
     netWorthHistory,
     notifications,
     accountRules,
+    activityLog,
+    categoryRules,
+    plannedIncomes,
+    autoBookings,
+    monthCloses,
   ] = await Promise.all([
     getEntities<Income>(userId, 'incomes'),
     getEntities<FixedExpense>(userId, 'fixedExpenses'),
@@ -104,6 +109,11 @@ export async function getFullState(userId: string): Promise<FinanceState> {
     kv.get<NetWorthSnapshot[]>(userKey(userId, 'netWorthHistory')),
     kv.get<AppNotification[]>(userKey(userId, 'notifications')),
     kv.get<AccountRule[]>(userKey(userId, 'accountRules')),
+    kv.get<ActivityLogEntry[]>(userKey(userId, 'activityLog')),
+    kv.get<CategoryRule[]>(userKey(userId, 'categoryRules')),
+    kv.get<PlannedIncome[]>(userKey(userId, 'plannedIncomes')),
+    kv.get<AutoBooking[]>(userKey(userId, 'autoBookings')),
+    kv.get<MonthClose[]>(userKey(userId, 'monthCloses')),
   ]);
 
   const month = selectedMonth || getCurrentMonth();
@@ -130,6 +140,11 @@ export async function getFullState(userId: string): Promise<FinanceState> {
     notifications: notifications || [],
     accountRules: accountRules || [],
     undoStack: [],
+    activityLog: activityLog || [],
+    categoryRules: categoryRules || [],
+    plannedIncomes: plannedIncomes || [],
+    autoBookings: autoBookings || [],
+    monthCloses: monthCloses || [],
   };
 }
 
@@ -154,5 +169,10 @@ export async function saveFullState(userId: string, state: FinanceState): Promis
     kv.set(userKey(userId, 'netWorthHistory'), state.netWorthHistory),
     kv.set(userKey(userId, 'notifications'), state.notifications),
     kv.set(userKey(userId, 'accountRules'), state.accountRules || []),
+    kv.set(userKey(userId, 'activityLog'), (state.activityLog || []).slice(0, 200)),
+    kv.set(userKey(userId, 'categoryRules'), state.categoryRules || []),
+    kv.set(userKey(userId, 'plannedIncomes'), state.plannedIncomes || []),
+    kv.set(userKey(userId, 'autoBookings'), state.autoBookings || []),
+    kv.set(userKey(userId, 'monthCloses'), state.monthCloses || []),
   ]);
 }

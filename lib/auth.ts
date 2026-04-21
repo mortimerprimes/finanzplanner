@@ -164,45 +164,8 @@ export const { handlers, signIn, signOut, auth } = NextAuth({
           return null;
         }
 
-        // --- New user registration ---
-
-        // Password strength: min 8 chars
-        if (password.length < 8) {
-          throw new Error('password_too_short');
-        }
-
-        // Signup rate limit (use a placeholder IP since we can't get it in authorize)
-        const signupKey = `signup:${email}`;
-        const recentSignup = await kv.get(signupKey);
-        if (recentSignup) {
-          throw new Error('signup_rate_limited');
-        }
-
-        // Check total user count
-        const userCount = await kv.get<number>('auth:user_count') ?? 0;
-        const maxUsers = parseInt(process.env.MAX_USERS || '100');
-        if (userCount >= maxUsers) {
-          throw new Error('max_users_reached');
-        }
-
-        const hash = await bcrypt.hash(password, 12);
-        const newUser: StoredUser = {
-          id: crypto.randomUUID(),
-          email,
-          name: email.split('@')[0],
-          password: hash,
-          createdAt: new Date().toISOString(),
-        };
-        await kv.set(userKey, newUser);
-        await kv.incr('auth:user_count');
-        // Prevent rapid re-registration from same email (60s cooldown)
-        await kv.set(signupKey, 1, { ex: 60 });
-
-        return {
-          id: newUser.id,
-          email: newUser.email,
-          name: newUser.name,
-        };
+        // No user found — registration must go through the dedicated /register page
+        throw new Error('no_account_found');
       },
     }),
   ],

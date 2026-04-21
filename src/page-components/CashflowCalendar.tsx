@@ -183,7 +183,7 @@ export function CashflowCalendar() {
               <button
                 key={day}
                 onClick={() => setSelectedDay(selectedDay === day ? null : day)}
-                className={`relative flex min-h-[72px] flex-col rounded-xl border p-1.5 text-left transition-all ${
+                className={`relative flex min-h-[64px] flex-col rounded-xl border p-1 text-left transition-all sm:min-h-[72px] sm:p-1.5 ${
                   isSelected
                     ? 'border-blue-400 bg-blue-50 ring-1 ring-blue-400 dark:border-blue-600 dark:bg-blue-950/30 dark:ring-blue-600'
                     : isToday

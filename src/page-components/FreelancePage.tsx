@@ -95,6 +95,10 @@ export function FreelancePage() {
   const [bulkDraft, setBulkDraft] = useState<BulkSessionDraft>(createDefaultBulkDraft(selectedMonth, freelanceProjects[0]?.id || ''));
   const [bulkSelectedDates, setBulkSelectedDates] = useState<string[]>([]);
   const [profileOpen, setProfileOpen] = useState(false);
+  const [sessionFilterProject, setSessionFilterProject] = useState<string>('all');
+  const [sessionFilterStatus, setSessionFilterStatus] = useState<'all' | 'open' | 'invoiced'>('all');
+  const [sessionFilterMonth, setSessionFilterMonth] = useState<string>('all');
+  const [invoiceFilterStatus, setInvoiceFilterStatus] = useState<'all' | 'issued' | 'paid' | 'cancelled'>('all');
 
   const projectOptions = freelanceProjects.map((project) => ({ value: project.id, label: `${project.name} · ${project.clientName}` }));
 
@@ -139,6 +143,52 @@ export function FreelancePage() {
       inv.status === 'issued' && new Date(inv.issueDate) < thirtyDaysAgo
     );
   }, [freelanceInvoices]);
+
+  // Yearly earnings tracking
+  const currentYear = selectedMonth.slice(0, 4);
+  const yearlyEarnings = useMemo(() => {
+    return freelanceInvoices
+      .filter(inv => inv.issueDate.slice(0, 4) === currentYear && (inv.status === 'paid' || inv.status === 'issued'))
+      .reduce((sum, inv) => sum + inv.netAmount, 0);
+  }, [freelanceInvoices, currentYear]);
+
+  const yearlyEarningsFromSessions = useMemo(() => {
+    return workSessions
+      .filter(s => s.date.slice(0, 4) === currentYear && s.billable)
+      .reduce((sum, s) => {
+        const project = freelanceProjects.find(p => p.id === s.projectId);
+        return sum + calculateSessionNetAmount(s, project);
+      }, 0);
+  }, [workSessions, freelanceProjects, currentYear]);
+
+  const freelanceYearlyLimit = settings.freelanceYearlyLimit || 0;
+  const yearlyTotal = Math.max(yearlyEarnings, yearlyEarningsFromSessions);
+  const yearlyLimitPercent = freelanceYearlyLimit > 0 ? (yearlyTotal / freelanceYearlyLimit) * 100 : 0;
+  const isNearLimit = freelanceYearlyLimit > 0 && yearlyLimitPercent >= 80;
+  const isOverLimit = freelanceYearlyLimit > 0 && yearlyTotal >= freelanceYearlyLimit;
+
+  // All sessions filtered
+  const filteredSessions = useMemo(() => {
+    let sessions = [...workSessions].sort((a, b) => b.date.localeCompare(a.date));
+    if (sessionFilterProject !== 'all') sessions = sessions.filter(s => s.projectId === sessionFilterProject);
+    if (sessionFilterStatus === 'open') sessions = sessions.filter(s => !s.invoiceId);
+    if (sessionFilterStatus === 'invoiced') sessions = sessions.filter(s => !!s.invoiceId);
+    if (sessionFilterMonth !== 'all') sessions = sessions.filter(s => s.date.slice(0, 7) === sessionFilterMonth);
+    return sessions;
+  }, [workSessions, sessionFilterProject, sessionFilterStatus, sessionFilterMonth]);
+
+  // Available months for filter
+  const availableSessionMonths = useMemo(() => {
+    const months = new Set(workSessions.map(s => s.date.slice(0, 7)));
+    return [...months].sort().reverse();
+  }, [workSessions]);
+
+  // All invoices filtered
+  const filteredInvoices = useMemo(() => {
+    let invoices = [...freelanceInvoices].sort((a, b) => b.issueDate.localeCompare(a.issueDate));
+    if (invoiceFilterStatus !== 'all') invoices = invoices.filter(inv => inv.status === invoiceFilterStatus);
+    return invoices;
+  }, [freelanceInvoices, invoiceFilterStatus]);
 
   // Effective hourly rate per project
   const projectProfitability = useMemo(() => {
@@ -628,14 +678,76 @@ export function FreelancePage() {
         )}
       </Card>
 
+      {/* Yearly Earnings Limit Warning */}
+      {freelanceYearlyLimit > 0 && (
+        <Card className={`p-5 ${isOverLimit ? 'border-red-300 bg-red-50 dark:border-red-800 dark:bg-red-950/20' : isNearLimit ? 'border-amber-300 bg-amber-50 dark:border-amber-800 dark:bg-amber-950/20' : ''}`}>
+          <div className="flex items-center justify-between gap-3 mb-2">
+            <div>
+              <h3 className={`text-sm font-bold ${isOverLimit ? 'text-red-700 dark:text-red-400' : isNearLimit ? 'text-amber-700 dark:text-amber-400' : 'text-gray-900 dark:text-white'}`}>
+                {isOverLimit ? '🚨 Jahresgrenze überschritten!' : isNearLimit ? '⚠ Achtung: Jahresgrenze nähert sich!' : `📊 Jahresumsatz ${currentYear}`}
+              </h3>
+              <p className="text-xs text-slate-500 dark:text-gray-400 mt-0.5">
+                {isOverLimit
+                  ? `Du hast die Grenze von ${formatCurrency(freelanceYearlyLimit, settings)} überschritten! Achtung: Steuerpflicht!`
+                  : isNearLimit
+                    ? `Noch ${formatCurrency(freelanceYearlyLimit - yearlyTotal, settings)} bis zur Grenze von ${formatCurrency(freelanceYearlyLimit, settings)}`
+                    : `Grenze: ${formatCurrency(freelanceYearlyLimit, settings)} · Noch ${formatCurrency(freelanceYearlyLimit - yearlyTotal, settings)} verfügbar`
+                }
+              </p>
+            </div>
+            <p className={`text-lg font-bold ${isOverLimit ? 'text-red-700 dark:text-red-400' : isNearLimit ? 'text-amber-700 dark:text-amber-400' : 'text-gray-900 dark:text-white'}`}>
+              {formatCurrency(yearlyTotal, settings)}
+            </p>
+          </div>
+          <ProgressBar value={Math.min(yearlyTotal, freelanceYearlyLimit)} max={freelanceYearlyLimit} color={isOverLimit ? '#ef4444' : isNearLimit ? '#f59e0b' : '#10b981'} size="md" />
+          <p className="text-xs text-slate-500 dark:text-gray-400 mt-1 text-right">{yearlyLimitPercent.toFixed(1)}% ausgeschöpft</p>
+        </Card>
+      )}
+
       <div className="grid grid-cols-1 gap-4 xl:grid-cols-2">
+        {/* ALL Work Sessions - Scrollable & Filterable */}
         <Card className="p-5">
-          <h3 className="mb-3 text-base font-semibold text-gray-900 dark:text-white">Letzte Zeiteinträge</h3>
+          <div className="mb-3 flex items-center justify-between gap-3">
+            <h3 className="text-base font-semibold text-gray-900 dark:text-white">Alle Zeiteinträge</h3>
+            <span className="text-xs font-medium text-slate-500 dark:text-gray-500">
+              {filteredSessions.length} von {workSessions.length} Einträgen
+            </span>
+          </div>
+          {/* Filters */}
+          <div className="mb-3 flex flex-wrap gap-2">
+            <select
+              value={sessionFilterProject}
+              onChange={(e) => setSessionFilterProject(e.target.value)}
+              className="rounded-lg border border-slate-200 bg-white px-2.5 py-1.5 text-xs font-medium text-slate-700 dark:border-gray-700 dark:bg-gray-800 dark:text-gray-300"
+            >
+              <option value="all">Alle Projekte</option>
+              {freelanceProjects.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}
+            </select>
+            <select
+              value={sessionFilterStatus}
+              onChange={(e) => setSessionFilterStatus(e.target.value as 'all' | 'open' | 'invoiced')}
+              className="rounded-lg border border-slate-200 bg-white px-2.5 py-1.5 text-xs font-medium text-slate-700 dark:border-gray-700 dark:bg-gray-800 dark:text-gray-300"
+            >
+              <option value="all">Alle Status</option>
+              <option value="open">Offen</option>
+              <option value="invoiced">Fakturiert</option>
+            </select>
+            <select
+              value={sessionFilterMonth}
+              onChange={(e) => setSessionFilterMonth(e.target.value)}
+              className="rounded-lg border border-slate-200 bg-white px-2.5 py-1.5 text-xs font-medium text-slate-700 dark:border-gray-700 dark:bg-gray-800 dark:text-gray-300"
+            >
+              <option value="all">Alle Monate</option>
+              {availableSessionMonths.map(m => <option key={m} value={m}>{getMonthDisplayName(m)}</option>)}
+            </select>
+          </div>
           {workSessions.length === 0 ? (
             <EmptyState icon="Clock3" title="Keine Stunden erfasst" description="Trage deine Arbeitszeiten ein, damit Umsatz und Rechnung automatisch berechnet werden." />
+          ) : filteredSessions.length === 0 ? (
+            <p className="text-sm text-slate-500 dark:text-gray-500 py-4 text-center">Keine Einträge für diese Filter.</p>
           ) : (
-            <div className="space-y-2">
-              {[...workSessions].sort((a, b) => b.date.localeCompare(a.date)).slice(0, 10).map((session) => {
+            <div className="space-y-2 max-h-[600px] overflow-y-auto pr-1">
+              {filteredSessions.map((session) => {
                 const project = freelanceProjects.find((item) => item.id === session.projectId);
                 const hours = calculateSessionHours(session);
                 const netAmount = calculateSessionNetAmount(session, project);
@@ -683,13 +795,34 @@ export function FreelancePage() {
           )}
         </Card>
 
+        {/* ALL Invoices - Scrollable & Filterable */}
         <Card className="p-5">
-          <h3 className="mb-3 text-base font-semibold text-gray-900 dark:text-white">Rechnungen</h3>
+          <div className="mb-3 flex items-center justify-between gap-3">
+            <h3 className="text-base font-semibold text-gray-900 dark:text-white">Rechnungen</h3>
+            <span className="text-xs font-medium text-slate-500 dark:text-gray-500">
+              {filteredInvoices.length} von {freelanceInvoices.length}
+            </span>
+          </div>
+          {/* Filter */}
+          <div className="mb-3">
+            <select
+              value={invoiceFilterStatus}
+              onChange={(e) => setInvoiceFilterStatus(e.target.value as 'all' | 'issued' | 'paid' | 'cancelled')}
+              className="rounded-lg border border-slate-200 bg-white px-2.5 py-1.5 text-xs font-medium text-slate-700 dark:border-gray-700 dark:bg-gray-800 dark:text-gray-300"
+            >
+              <option value="all">Alle Status</option>
+              <option value="issued">Offen</option>
+              <option value="paid">Bezahlt</option>
+              <option value="cancelled">Storniert</option>
+            </select>
+          </div>
           {freelanceInvoices.length === 0 ? (
             <EmptyState icon="FileText" title="Noch keine Rechnungen" description="Mit einem Klick erzeugst du eine Rechnung aus allen offenen Stunden eines Monats." />
+          ) : filteredInvoices.length === 0 ? (
+            <p className="text-sm text-slate-500 dark:text-gray-500 py-4 text-center">Keine Rechnungen für diesen Filter.</p>
           ) : (
-            <div className="space-y-2">
-              {freelanceInvoices.slice(0, 10).map((invoice) => {
+            <div className="space-y-2 max-h-[600px] overflow-y-auto pr-1">
+              {filteredInvoices.map((invoice) => {
                 const project = freelanceProjects.find((item) => item.id === invoice.projectId);
                 const sessions = workSessions.filter((session) => invoice.sessionIds.includes(session.id));
                 return (

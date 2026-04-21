@@ -175,6 +175,7 @@ export function BankSyncPage() {
             isRecurring: false,
             date: draft.date,
             month: draft.date.slice(0, 7),
+            accountId: draft.accountId || selectedConnection.accountId || undefined,
             note: [draft.note, accountLabel ? `Konto: ${accountLabel}` : '', sourceFileName ? `Quelle: ${sourceFileName}` : '']
               .filter(Boolean)
               .join(' · ') || undefined,
