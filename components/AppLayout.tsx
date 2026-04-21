@@ -1,6 +1,6 @@
 'use client';
 
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 import { signOut } from 'next-auth/react';
@@ -8,7 +8,7 @@ import {
   LayoutDashboard, TrendingUp, Receipt, CreditCard, PiggyBank,
   Wallet, Landmark, RefreshCw, Settings, BarChart3, Menu, X,
   ChevronLeft, ChevronRight, Sun, Moon, Monitor, Target, CalendarDays, LogOut, UserCircle,
-  CalendarRange, FileBarChart, Crown
+  CalendarRange, FileBarChart, Crown, Clock, Shield, Flag, Image, Zap, ChevronDown
 } from 'lucide-react';
 import { useTheme } from '@/src/hooks/useTheme';
 import { useFinance } from '@/lib/finance-context';
@@ -21,37 +21,117 @@ import { GlobalSearch } from '@/src/components/GlobalSearch';
 import { useKeyboardShortcuts, KeyboardShortcutsHelp } from '@/src/hooks/useKeyboardShortcuts';
 import { useSession } from 'next-auth/react';
 
-const navItems = [
-  { href: '/dashboard', label: 'Dashboard', icon: LayoutDashboard },
-  { href: '/income', label: 'Einnahmen', icon: TrendingUp },
-  { href: '/fixed-expenses', label: 'Fixkosten', icon: Receipt },
-  { href: '/debts', label: 'Schulden', icon: CreditCard },
+interface NavItem {
+  href: string;
+  label: string;
+  icon: typeof LayoutDashboard;
+  adminOnly?: boolean;
+}
+
+interface NavGroup {
+  label: string;
+  items: NavItem[];
+}
+
+const navGroups: NavGroup[] = [
+  {
+    label: 'Übersicht',
+    items: [
+      { href: '/dashboard', label: 'Dashboard', icon: LayoutDashboard },
+      { href: '/analytics', label: 'Analysen', icon: BarChart3 },
+      { href: '/cashflow', label: 'Cashflow', icon: CalendarRange },
+    ],
+  },
+  {
+    label: 'Finanzen',
+    items: [
+      { href: '/income', label: 'Einnahmen', icon: TrendingUp },
+      { href: '/fixed-expenses', label: 'Fixkosten', icon: Receipt },
+      { href: '/debts', label: 'Schulden', icon: CreditCard },
+      { href: '/expenses', label: 'Ausgaben', icon: Wallet },
+      { href: '/budget', label: 'Budgets', icon: Target },
+    ],
+  },
+  {
+    label: 'Vermögen',
+    items: [
+      { href: '/savings', label: 'Sparziele', icon: PiggyBank },
+      { href: '/accounts', label: 'Konten', icon: Landmark },
+      { href: '/freelance', label: 'Freelance', icon: CalendarDays },
+    ],
+  },
+  {
+    label: 'Berichte',
+    items: [
+      { href: '/annual-report', label: 'Jahresbericht', icon: FileBarChart },
+      { href: '/finance-score', label: 'Finanz-Score', icon: Shield },
+      { href: '/finance-goals', label: 'Finanz-Ziele', icon: Flag },
+    ],
+  },
+  {
+    label: 'Tools',
+    items: [
+      { href: '/bank-sync', label: 'Bank Sync', icon: RefreshCw },
+      { href: '/receipts', label: 'Belege', icon: Image },
+      { href: '/category-rules', label: 'Regeln', icon: Zap },
+      { href: '/activity-log', label: 'Aktivitäten', icon: Clock },
+    ],
+  },
+  {
+    label: 'System',
+    items: [
+      { href: '/settings', label: 'Einstellungen', icon: Settings },
+      { href: '/admin', label: 'Admin', icon: Crown, adminOnly: true },
+      { href: '/profile', label: 'Profil', icon: UserCircle },
+    ],
+  },
+];
+
+// Flat list for backward compat (page title lookup etc.)
+const allNavItems = navGroups.flatMap(g => g.items);
+
+const mobileTabItems: NavItem[] = [
+  { href: '/dashboard', label: 'Start', icon: LayoutDashboard },
   { href: '/expenses', label: 'Ausgaben', icon: Wallet },
   { href: '/budget', label: 'Budgets', icon: Target },
-  { href: '/savings', label: 'Sparziele', icon: PiggyBank },
   { href: '/accounts', label: 'Konten', icon: Landmark },
-  { href: '/bank-sync', label: 'Bank Sync', icon: RefreshCw },
-  { href: '/freelance', label: 'Freelance', icon: CalendarDays },
-  { href: '/cashflow', label: 'Cashflow', icon: CalendarRange },
-  { href: '/analytics', label: 'Analysen', icon: BarChart3 },
-  { href: '/annual-report', label: 'Jahresbericht', icon: FileBarChart },
-  { href: '/settings', label: 'Einstellungen', icon: Settings },
-  { href: '/admin', label: 'Admin', icon: Crown, adminOnly: true },
-  { href: '/profile', label: 'Profil', icon: UserCircle },
 ];
 
 export function AppLayout({ children }: { children: React.ReactNode }) {
   const [sidebarOpen, setSidebarOpen] = useState(true);
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
   const [monthPickerOpen, setMonthPickerOpen] = useState(false);
+  const [collapsedGroups, setCollapsedGroups] = useState<Set<string>>(new Set());
   const { theme, setTheme, resolvedTheme } = useTheme();
   const { state, dispatch } = useFinance();
   const pathname = usePathname();
   const { data: session } = useSession();
   const isAdmin = (session?.user as { role?: string } | undefined)?.role === 'admin';
+  const hiddenMenuItems = state.settings.hiddenMenuItems || [];
 
-  // Filter nav items based on role
-  const visibleNavItems = navItems.filter(item => !(item as { adminOnly?: boolean }).adminOnly || isAdmin);
+  // Filter nav groups based on admin role and hidden items
+  const visibleGroups = navGroups
+    .map(group => ({
+      ...group,
+      items: group.items.filter(item => {
+        if (item.adminOnly && !isAdmin) return false;
+        if (hiddenMenuItems.includes(item.href)) return false;
+        return true;
+      }),
+    }))
+    .filter(group => group.items.length > 0);
+
+  const currentNavItem = allNavItems.find(item => pathname === item.href);
+  const isMobileMoreActive = mobileMenuOpen || !mobileTabItems.some((item) => pathname === item.href || pathname.startsWith(`${item.href}/`));
+
+  const toggleGroup = (label: string) => {
+    setCollapsedGroups(prev => {
+      const next = new Set(prev);
+      if (next.has(label)) next.delete(label);
+      else next.add(label);
+      return next;
+    });
+  };
 
   // Run notification engine
   useNotificationEngine();
@@ -59,12 +139,27 @@ export function AppLayout({ children }: { children: React.ReactNode }) {
   useKeyboardShortcuts();
   const [shortcutsOpen, setShortcutsOpen] = useState(false);
 
-  // Listen for shortcuts help
-  useState(() => {
+  useEffect(() => {
     const handler = () => setShortcutsOpen(true);
     window.addEventListener('show-shortcuts', handler);
     return () => window.removeEventListener('show-shortcuts', handler);
-  });
+  }, []);
+
+  useEffect(() => {
+    setMobileMenuOpen(false);
+    setMonthPickerOpen(false);
+  }, [pathname]);
+
+  useEffect(() => {
+    document.body.classList.toggle('mobile-menu-open', mobileMenuOpen);
+    return () => document.body.classList.remove('mobile-menu-open');
+  }, [mobileMenuOpen]);
+
+  useEffect(() => {
+    if (state.settings.theme && state.settings.theme !== theme) {
+      setTheme(state.settings.theme);
+    }
+  }, [setTheme, state.settings.theme, theme]);
 
   const handlePrevMonth = () => {
     const [year, month] = state.selectedMonth.split('-').map(Number);
@@ -87,15 +182,15 @@ export function AppLayout({ children }: { children: React.ReactNode }) {
   const cycleTheme = () => {
     const themes: ('light' | 'dark' | 'system')[] = ['light', 'dark', 'system'];
     const idx = themes.indexOf(theme);
-    setTheme(themes[(idx + 1) % themes.length]);
+    const nextTheme = themes[(idx + 1) % themes.length];
+    setTheme(nextTheme);
+    dispatch({ type: 'UPDATE_SETTINGS', payload: { theme: nextTheme } });
   };
 
   const ThemeIcon = theme === 'system' ? Monitor : resolvedTheme === 'dark' ? Moon : Sun;
   const sidebarW = sidebarOpen ? 260 : 72;
   const monthOptions = getMonthPickerRange(state.selectedMonth, 8, 7);
   const isSettingsPage = pathname === '/settings';
-
-  const currentNavItem = visibleNavItems.find(item => pathname === item.href);
 
   const handleSelectMonth = (month: string) => {
     dispatch({ type: 'SET_SELECTED_MONTH', payload: month });
@@ -124,25 +219,55 @@ export function AppLayout({ children }: { children: React.ReactNode }) {
           </button>
         </div>
 
-        <nav className="flex-1 py-4 px-3 space-y-1 overflow-y-auto">
-          {visibleNavItems.map((item) => {
-            const Icon = item.icon;
-            const isActive = pathname === item.href;
+        <nav className="flex-1 py-3 px-3 space-y-0.5 overflow-y-auto">
+          {visibleGroups.map((group) => {
+            const isCollapsed = collapsedGroups.has(group.label);
+            const hasActiveItem = group.items.some(item => pathname === item.href);
             return (
-              <Link
-                key={item.href}
-                href={item.href}
-                className={`
-                  w-full flex items-center gap-3 rounded-xl transition-all duration-200
-                  ${sidebarOpen ? 'px-3 py-2.5' : 'px-0 py-2.5 justify-center'}
-                  ${isActive
-                    ? 'bg-blue-600 text-white shadow-md shadow-blue-600/25'
-                    : 'text-slate-600 dark:text-gray-400 hover:bg-slate-100 dark:hover:bg-gray-800 hover:text-slate-900 dark:hover:text-white'}
-                `}
-              >
-                <Icon size={20} className="flex-shrink-0" />
-                {sidebarOpen && <span className="text-sm font-medium whitespace-nowrap">{item.label}</span>}
-              </Link>
+              <div key={group.label}>
+                {sidebarOpen && (
+                  <button
+                    onClick={() => toggleGroup(group.label)}
+                    className="w-full flex items-center justify-between px-3 py-1.5 mt-2 mb-0.5 text-[10px] font-bold uppercase tracking-[0.12em] text-slate-400 dark:text-gray-600 hover:text-slate-600 dark:hover:text-gray-400 transition-colors"
+                  >
+                    {group.label}
+                    <ChevronDown size={12} className={`transition-transform ${isCollapsed ? '-rotate-90' : ''}`} />
+                  </button>
+                )}
+                {(!isCollapsed || !sidebarOpen) && group.items.map((item) => {
+                  const ItemIcon = item.icon;
+                  const isActive = pathname === item.href;
+                  return (
+                    <Link
+                      key={item.href}
+                      href={item.href}
+                      className={`
+                        w-full flex items-center gap-3 rounded-xl transition-all duration-200
+                        ${sidebarOpen ? 'px-3 py-2' : 'px-0 py-2 justify-center'}
+                        ${isActive
+                          ? 'bg-blue-600 text-white shadow-md shadow-blue-600/25'
+                          : 'text-slate-600 dark:text-gray-400 hover:bg-slate-100 dark:hover:bg-gray-800 hover:text-slate-900 dark:hover:text-white'}
+                      `}
+                    >
+                      <ItemIcon size={18} className="flex-shrink-0" />
+                      {sidebarOpen && <span className="text-sm font-medium whitespace-nowrap">{item.label}</span>}
+                    </Link>
+                  );
+                })}
+                {isCollapsed && sidebarOpen && hasActiveItem && group.items.filter(item => pathname === item.href).map(item => {
+                  const ItemIcon = item.icon;
+                  return (
+                    <Link
+                      key={item.href}
+                      href={item.href}
+                      className="w-full flex items-center gap-3 rounded-xl px-3 py-2 bg-blue-600 text-white shadow-md shadow-blue-600/25"
+                    >
+                      <ItemIcon size={18} className="flex-shrink-0" />
+                      <span className="text-sm font-medium whitespace-nowrap">{item.label}</span>
+                    </Link>
+                  );
+                })}
+              </div>
             );
           })}
         </nav>
@@ -170,7 +295,7 @@ export function AppLayout({ children }: { children: React.ReactNode }) {
       </aside>
 
       {/* MOBILE HEADER */}
-      <div className="lg:hidden fixed top-0 left-0 right-0 z-50 h-14 bg-white dark:bg-gray-900 border-b border-slate-200 dark:border-gray-800 flex items-center justify-between px-4">
+      <div className="lg:hidden fixed inset-x-0 top-0 z-50 flex h-[calc(3.5rem+var(--safe-area-top))] items-center justify-between border-b border-slate-200 bg-white/95 px-4 pt-[var(--safe-area-top)] backdrop-blur-xl dark:border-gray-800 dark:bg-gray-900/95">
         <button
           onClick={() => setMobileMenuOpen(!mobileMenuOpen)}
           className="p-2 rounded-lg hover:bg-slate-100 dark:hover:bg-gray-800 text-slate-700 dark:text-gray-300"
@@ -179,6 +304,10 @@ export function AppLayout({ children }: { children: React.ReactNode }) {
         </button>
         <h1 className="text-base font-bold text-gray-900 dark:text-white">💰 Finanzplanner</h1>
         <div className="flex items-center gap-1">
+          <GlobalSearch
+            buttonClassName="inline-flex rounded-lg p-2 text-slate-500 transition-colors hover:bg-slate-100 dark:text-gray-400 dark:hover:bg-gray-800 lg:hidden"
+            iconOnly
+          />
           <NotificationBell />
           <button
             onClick={cycleTheme}
@@ -193,30 +322,37 @@ export function AppLayout({ children }: { children: React.ReactNode }) {
       {mobileMenuOpen && (
         <>
           <div className="lg:hidden fixed inset-0 z-40 bg-black/40 animate-overlay" onClick={() => setMobileMenuOpen(false)} />
-          <div className="lg:hidden fixed top-14 left-0 bottom-0 z-40 w-64 bg-white dark:bg-gray-900 border-r border-slate-200 dark:border-gray-800 animate-fade-in">
-            <nav className="py-4 px-3 space-y-1">
-              {visibleNavItems.map((item) => {
-                const Icon = item.icon;
-                const isActive = pathname === item.href;
-                return (
-                  <Link
-                    key={item.href}
-                    href={item.href}
-                    onClick={() => setMobileMenuOpen(false)}
-                    className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-xl transition-all ${
-                      isActive ? 'bg-blue-600 text-white shadow-md' : 'text-slate-600 dark:text-gray-400 hover:bg-slate-100 dark:hover:bg-gray-800'
-                    }`}
-                  >
-                    <Icon size={20} />
-                    <span className="text-sm font-medium">{item.label}</span>
-                  </Link>
-                );
-              })}
+          <div className="lg:hidden fixed bottom-0 left-0 top-[calc(3.5rem+var(--safe-area-top))] z-40 w-[85vw] max-w-xs overflow-y-auto border-r border-slate-200 bg-white dark:border-gray-800 dark:bg-gray-900 animate-fade-in">
+            <nav className="space-y-0.5 px-3 pb-[calc(1rem+var(--safe-area-bottom))] pt-3">
+              {visibleGroups.map((group) => (
+                <div key={group.label}>
+                  <p className="px-3 py-1.5 mt-2 mb-0.5 text-[10px] font-bold uppercase tracking-[0.12em] text-slate-400 dark:text-gray-600">
+                    {group.label}
+                  </p>
+                  {group.items.map((item) => {
+                    const ItemIcon = item.icon;
+                    const isActive = pathname === item.href;
+                    return (
+                      <Link
+                        key={item.href}
+                        href={item.href}
+                        onClick={() => setMobileMenuOpen(false)}
+                        className={`w-full flex items-center gap-3 px-3 py-2 rounded-xl transition-all ${
+                          isActive ? 'bg-blue-600 text-white shadow-md' : 'text-slate-600 dark:text-gray-400 hover:bg-slate-100 dark:hover:bg-gray-800'
+                        }`}
+                      >
+                        <ItemIcon size={18} />
+                        <span className="text-sm font-medium">{item.label}</span>
+                      </Link>
+                    );
+                  })}
+                </div>
+              ))}
               <button
                 onClick={() => signOut({ callbackUrl: '/login' })}
-                className="w-full flex items-center gap-3 px-3 py-2.5 rounded-xl text-slate-600 dark:text-gray-400 hover:bg-red-50 dark:hover:bg-red-950/30 hover:text-red-600 transition-all"
+                className="w-full flex items-center gap-3 px-3 py-2 mt-2 rounded-xl text-slate-600 dark:text-gray-400 hover:bg-red-50 dark:hover:bg-red-950/30 hover:text-red-600 transition-all"
               >
-                <LogOut size={20} />
+                <LogOut size={18} />
                 <span className="text-sm font-medium">Abmelden</span>
               </button>
             </nav>
@@ -226,19 +362,19 @@ export function AppLayout({ children }: { children: React.ReactNode }) {
 
       {/* MAIN CONTENT */}
       <div className="flex-1 flex flex-col min-w-0 h-screen overflow-hidden">
-        <header className="mt-14 flex min-h-16 flex-shrink-0 flex-wrap items-center gap-3 border-b border-slate-200 bg-white px-4 py-3 dark:border-gray-800 dark:bg-gray-900 lg:mt-0 lg:px-6">
+        <header className="mt-[calc(3.5rem+var(--safe-area-top))] flex min-h-16 flex-shrink-0 flex-wrap items-center gap-2 border-b border-slate-200 bg-white px-3 py-2 dark:border-gray-800 dark:bg-gray-900 lg:mt-0 lg:gap-3 lg:px-6 lg:py-3">
           <h2 className="text-xl font-bold text-gray-900 dark:text-white truncate">
             {currentNavItem?.label || 'Dashboard'}
           </h2>
 
           {!isSettingsPage && (
-            <div className="ml-auto flex items-center gap-1 rounded-xl bg-slate-100 p-1 dark:bg-gray-800 flex-shrink-0">
+            <div className="ml-auto flex w-full items-center gap-1 rounded-xl bg-slate-100 p-1 dark:bg-gray-800 sm:w-auto flex-shrink-0">
               <button onClick={handlePrevMonth} className="p-2 rounded-lg hover:bg-white dark:hover:bg-gray-700 transition-colors">
                 <ChevronLeft size={18} className="text-slate-600 dark:text-gray-400" />
               </button>
               <button
                 onClick={() => setMonthPickerOpen(true)}
-                className="inline-flex min-w-[160px] items-center justify-center gap-2 rounded-lg px-3 py-1.5 text-sm font-semibold text-gray-900 transition-colors hover:bg-white dark:text-white dark:hover:bg-gray-700"
+                className="inline-flex min-w-0 flex-1 items-center justify-center gap-2 rounded-lg px-3 py-1.5 text-sm font-semibold text-gray-900 transition-colors hover:bg-white dark:text-white dark:hover:bg-gray-700 sm:min-w-[160px] sm:flex-none"
               >
                 <CalendarDays size={15} className="text-slate-500 dark:text-gray-400" />
                 {getMonthDisplayName(state.selectedMonth)}
@@ -254,12 +390,46 @@ export function AppLayout({ children }: { children: React.ReactNode }) {
           </div>
         </header>
 
-        <main className="flex-1 overflow-y-auto overflow-x-hidden p-4 md:p-5 lg:p-6">
+        <main className="flex-1 overflow-y-auto overflow-x-hidden p-3 pb-[calc(5.5rem+var(--safe-area-bottom))] md:p-5 lg:p-6 lg:pb-6">
           <div className="mx-auto w-full max-w-6xl 2xl:max-w-[1320px]">
             {children}
           </div>
         </main>
       </div>
+
+      <nav className="lg:hidden fixed inset-x-0 bottom-0 z-40 border-t border-slate-200 bg-white/95 px-2 pb-[var(--safe-area-bottom)] pt-2 backdrop-blur-xl dark:border-gray-800 dark:bg-gray-900/95">
+        <div className="grid grid-cols-5 gap-1">
+          {mobileTabItems.map((item) => {
+            const ItemIcon = item.icon;
+            const isActive = pathname === item.href || pathname.startsWith(`${item.href}/`);
+            return (
+              <Link
+                key={item.href}
+                href={item.href}
+                className={`flex min-h-[3.5rem] flex-col items-center justify-center gap-1 rounded-2xl px-1 py-2 text-[11px] font-medium transition-all ${
+                  isActive
+                    ? 'bg-blue-600 text-white shadow-md shadow-blue-600/25'
+                    : 'text-slate-600 hover:bg-slate-100 dark:text-gray-400 dark:hover:bg-gray-800'
+                }`}
+              >
+                <ItemIcon size={18} />
+                <span>{item.label}</span>
+              </Link>
+            );
+          })}
+          <button
+            onClick={() => setMobileMenuOpen((value) => !value)}
+            className={`flex min-h-[3.5rem] flex-col items-center justify-center gap-1 rounded-2xl px-1 py-2 text-[11px] font-medium transition-all ${
+              isMobileMoreActive
+                ? 'bg-slate-900 text-white dark:bg-white dark:text-gray-900'
+                : 'text-slate-600 hover:bg-slate-100 dark:text-gray-400 dark:hover:bg-gray-800'
+            }`}
+          >
+            {mobileMenuOpen ? <X size={18} /> : <Menu size={18} />}
+            <span>Mehr</span>
+          </button>
+        </div>
+      </nav>
 
       <Modal isOpen={monthPickerOpen} onClose={() => setMonthPickerOpen(false)} title="Monat auswählen">
         <div className="space-y-5">

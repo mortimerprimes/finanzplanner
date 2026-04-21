@@ -200,7 +200,18 @@ export interface IncomeReconciliationResult {
 }
 
 export function reconcileIncomesForMonth(incomes: Income[], month: string): IncomeReconciliationResult {
-  const monthIncomes = incomes.filter((income) => income.isRecurring || getIncomeMonth(income) === month);
+  // Only include recurring incomes if this month >= their startMonth (or startMonth not set = legacy data, always include)
+  const monthIncomes = incomes.filter((income) => {
+    if (income.isRecurring) {
+      // Respect startMonth: recurring income only applies from the month it was created onwards
+      const startMonth = income.startMonth || income.createdAt?.slice(0, 7);
+      if (startMonth && month < startMonth) return false;
+      // Also respect effectiveFromMonth for future-planned incomes
+      if (income.effectiveFromMonth && month < income.effectiveFromMonth) return false;
+      return true;
+    }
+    return getIncomeMonth(income) === month;
+  });
   const recurring = monthIncomes.filter((income) => income.isRecurring);
   const oneTime = monthIncomes.filter((income) => !income.isRecurring);
   const imported = oneTime.filter(isBankImportedIncome);
@@ -259,12 +270,20 @@ function getFixedReconciliationMatchScore(fixedExpense: FixedExpense, expense: E
   return score;
 }
 
+export interface FixedExpenseEffectiveEntry {
+  fixedExpenseId: string;
+  linkedDebtId?: string;
+  effectiveAmount: number;
+  matchedImportedExpenseId?: string;
+}
+
 export interface FixedExpenseReconciliationResult {
   totalPlanned: number;
   totalActualImported: number;
   totalEffective: number;
   matchedFixedExpenseIds: Set<string>;
   matchedImportedExpenseIds: Set<string>;
+  entries: FixedExpenseEffectiveEntry[];
 }
 
 export function reconcileFixedExpensesForMonth(
@@ -279,6 +298,7 @@ export function reconcileFixedExpensesForMonth(
   const usedImportedIds = new Set<string>();
   const matchedFixedExpenseIds = new Set<string>();
   const matchedImportedExpenseIds = new Set<string>();
+  const entries: FixedExpenseEffectiveEntry[] = [];
 
   const fixedEffectiveSum = activeFixedExpenses.reduce((sum, fixedExpense) => {
     const tolerance = Math.max(5, fixedExpense.amount * 0.03);
@@ -295,9 +315,20 @@ export function reconcileFixedExpensesForMonth(
       usedImportedIds.add(match.id);
       matchedFixedExpenseIds.add(fixedExpense.id);
       matchedImportedExpenseIds.add(match.id);
+      entries.push({
+        fixedExpenseId: fixedExpense.id,
+        linkedDebtId: fixedExpense.linkedDebtId,
+        effectiveAmount: match.amount,
+        matchedImportedExpenseId: match.id,
+      });
       return sum + match.amount;
     }
 
+    entries.push({
+      fixedExpenseId: fixedExpense.id,
+      linkedDebtId: fixedExpense.linkedDebtId,
+      effectiveAmount: fixedExpense.amount,
+    });
     return sum + fixedExpense.amount;
   }, 0);
 
@@ -311,6 +342,7 @@ export function reconcileFixedExpensesForMonth(
     totalEffective,
     matchedFixedExpenseIds,
     matchedImportedExpenseIds,
+    entries,
   };
 }
 
@@ -352,17 +384,51 @@ export const calculateMonthSummary = (
 ): MonthSummary => {
   const incomeReconciliation = reconcileIncomesForMonth(incomes, month);
   const fixedReconciliation = reconcileFixedExpensesForMonth(fixedExpenses, expenses, month);
-  
+
   const totalIncome = incomeReconciliation.totalEffective;
-  const totalFixedExpenses = fixedReconciliation.totalEffective;
-  const totalDebtPayments = calculateTotal(debts.map(d => ({ amount: d.monthlyPayment })));
   const monthExpenses = getExpensesForMonth(expenses, month);
-  const variableExpenses = monthExpenses.filter((expense) => !fixedReconciliation.matchedImportedExpenseIds.has(expense.id));
+  const totalFixedExpenses = fixedReconciliation.entries
+    .filter((entry) => !entry.linkedDebtId)
+    .reduce((sum, entry) => sum + entry.effectiveAmount, 0);
+
+  const excludedExpenseIds = new Set<string>([
+    ...fixedReconciliation.matchedImportedExpenseIds,
+    ...monthExpenses
+      .filter((expense) => expense.autoBookedType === 'fixedExpense')
+      .map((expense) => expense.id),
+  ]);
+
+  const coveredDebtIds = new Set<string>();
+  let totalDebtPayments = fixedReconciliation.entries
+    .filter((entry) => Boolean(entry.linkedDebtId))
+    .reduce((sum, entry) => {
+      if (entry.linkedDebtId) {
+        coveredDebtIds.add(entry.linkedDebtId);
+      }
+      return sum + entry.effectiveAmount;
+    }, 0);
+
+  const manualDebtExpenses = monthExpenses.filter(
+    (expense) => Boolean(expense.linkedDebtId) && !excludedExpenseIds.has(expense.id)
+  );
+  manualDebtExpenses.forEach((expense) => {
+    excludedExpenseIds.add(expense.id);
+    if (expense.linkedDebtId) {
+      coveredDebtIds.add(expense.linkedDebtId);
+    }
+  });
+  totalDebtPayments += calculateTotal(manualDebtExpenses);
+
+  totalDebtPayments += debts
+    .filter((debt) => debt.remainingAmount > 0 && !coveredDebtIds.has(debt.id))
+    .reduce((sum, debt) => sum + debt.monthlyPayment, 0);
+
+  const variableExpenses = monthExpenses.filter((expense) => !excludedExpenseIds.has(expense.id));
   const totalVariableExpenses = calculateTotal(variableExpenses);
   const expensesByCategory = calculateExpensesByCategory(expenses, month);
-  
+
   const remaining = totalIncome - totalFixedExpenses - totalDebtPayments - totalVariableExpenses;
-  
+
   return {
     month,
     totalIncome,
@@ -375,6 +441,70 @@ export const calculateMonthSummary = (
   };
 };
 
+function findLatestBudget(
+  budgetLimits: BudgetLimit[],
+  predicate: (budget: BudgetLimit) => boolean
+): BudgetLimit | undefined {
+  for (let index = budgetLimits.length - 1; index >= 0; index -= 1) {
+    if (predicate(budgetLimits[index])) {
+      return budgetLimits[index];
+    }
+  }
+  return undefined;
+}
+
+export const getBudgetLimitValue = (
+  budget: Pick<BudgetLimit, 'amount' | 'monthlyLimit' | 'rolloverAmount'>
+): number => {
+  const baseAmount = budget.monthlyLimit > 0 ? budget.monthlyLimit : budget.amount;
+  return Math.max(0, baseAmount + (budget.rolloverAmount || 0));
+};
+
+export const getBudgetLimitForMonth = (
+  budgetLimits: BudgetLimit[],
+  category: ExpenseCategory,
+  month: string
+): BudgetLimit | undefined => {
+  const exact = findLatestBudget(
+    budgetLimits,
+    (budget) => budget.category === category && budget.month === month
+  );
+  if (exact) {
+    return exact;
+  }
+
+  return findLatestBudget(
+    budgetLimits,
+    (budget) => budget.category === category && budget.isRecurring
+  );
+};
+
+export const getActiveBudgetLimits = (
+  budgetLimits: BudgetLimit[],
+  month: string
+): BudgetLimit[] => {
+  const resolved: BudgetLimit[] = [];
+  const seenCategories = new Set<string>();
+
+  for (let index = budgetLimits.length - 1; index >= 0; index -= 1) {
+    const budget = budgetLimits[index];
+    if (budget.month === month && !seenCategories.has(budget.category)) {
+      resolved.unshift(budget);
+      seenCategories.add(budget.category);
+    }
+  }
+
+  for (let index = budgetLimits.length - 1; index >= 0; index -= 1) {
+    const budget = budgetLimits[index];
+    if (budget.isRecurring && !seenCategories.has(budget.category)) {
+      resolved.unshift(budget);
+      seenCategories.add(budget.category);
+    }
+  }
+
+  return resolved;
+};
+
 // Get budget usage percentage
 export const getBudgetUsage = (
   category: ExpenseCategory,
@@ -382,16 +512,15 @@ export const getBudgetUsage = (
   budgetLimits: BudgetLimit[],
   month: string
 ): { used: number; limit: number; percentage: number } | null => {
-  const limit = budgetLimits.find(
-    b => b.category === category && (b.month === month || b.isRecurring)
-  );
-  
+  const limit = getBudgetLimitForMonth(budgetLimits, category, month);
+
   if (!limit) return null;
-  
+
+  const effectiveLimit = getBudgetLimitValue(limit);
   const used = calculateExpensesByCategory(expenses, month)[category] || 0;
-  const percentage = Math.min((used / limit.monthlyLimit) * 100, 100);
-  
-  return { used, limit: limit.monthlyLimit, percentage };
+  const percentage = effectiveLimit > 0 ? Math.min((used / effectiveLimit) * 100, 100) : 0;
+
+  return { used, limit: effectiveLimit, percentage };
 };
 
 // Calculate debt payoff time
@@ -588,7 +717,7 @@ export const calculateBudgetStatus = (
   budgetLimits: BudgetLimit[],
   warningThreshold: number
 ): { isWarning: boolean; isOver: boolean; percentage: number } => {
-  const budget = budgetLimits.find((item) => item.category === expense.category && (item.month === expense.month || item.isRecurring));
+  const budget = getBudgetLimitForMonth(budgetLimits, expense.category, expense.month);
   if (!budget) {
     return { isWarning: false, isOver: false, percentage: 0 };
   }
@@ -597,7 +726,8 @@ export const calculateBudgetStatus = (
     .filter((item) => item.month === expense.month && item.category === expense.category)
     .reduce((sum, item) => sum + item.amount, 0);
 
-  const percentage = budget.monthlyLimit > 0 ? (spent / budget.monthlyLimit) * 100 : 0;
+  const effectiveLimit = getBudgetLimitValue(budget);
+  const percentage = effectiveLimit > 0 ? (spent / effectiveLimit) * 100 : 0;
   return {
     isWarning: percentage >= warningThreshold,
     isOver: percentage >= 100,
@@ -702,16 +832,25 @@ export const calculateSavingsStreak = (
 export const calculateBudgetRollover = (
   category: string,
   month: string,
-  budgetLimits: { category: string; amount: number; month: string; enableRollover?: boolean }[],
+  budgetLimits: BudgetLimit[],
   expenses: { category: string; month: string; amount: number }[]
 ): number => {
+  const currentBudget = budgetLimits.find(
+    (budget) => budget.category === category && budget.month === month && budget.enableRollover
+  );
+  if (currentBudget?.rolloverAmount) {
+    return currentBudget.rolloverAmount;
+  }
+
   const [y, m] = month.split('-').map(Number);
   const prevDate = new Date(y, m - 2, 1);
   const prevMonth = `${prevDate.getFullYear()}-${String(prevDate.getMonth() + 1).padStart(2, '0')}`;
-  const prevBudget = budgetLimits.find(b => b.category === category && (b.month === prevMonth || b.month === month) && b.enableRollover);
+  const prevBudget = budgetLimits.find(
+    (budget) => budget.category === category && budget.month === prevMonth && budget.enableRollover
+  );
   if (!prevBudget) return 0;
   const prevSpent = expenses.filter(e => e.month === prevMonth && e.category === category).reduce((s, e) => s + e.amount, 0);
-  return Math.max(0, prevBudget.amount - prevSpent);
+  return Math.max(0, getBudgetLimitValue(prevBudget) - prevSpent);
 };
 
 // Global search across all data

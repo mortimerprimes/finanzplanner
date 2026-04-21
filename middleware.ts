@@ -10,6 +10,16 @@ export default auth((req) => {
     return NextResponse.next();
   }
 
+  // Demo routes are always public (no login required)
+  if (pathname.startsWith('/demo')) {
+    return NextResponse.next();
+  }
+
+  // Landing page is public
+  if (pathname === '/') {
+    return NextResponse.next();
+  }
+
   // Public routes
   if (pathname.startsWith('/login') || pathname.startsWith('/api/auth')) {
     if (isLoggedIn && pathname.startsWith('/login')) {

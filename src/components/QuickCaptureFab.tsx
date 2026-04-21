@@ -1,3 +1,5 @@
+'use client';
+
 import { ChangeEvent, useState } from 'react';
 import { Camera, Mic, Plus, Receipt, TrendingUp, Wallet } from 'lucide-react';
 import { useFinance } from '@/lib/finance-context';
@@ -251,7 +253,7 @@ export function QuickCaptureFab() {
     <>
       <button
         onClick={() => setIsOpen(true)}
-        className="fixed bottom-6 right-6 z-[80] inline-flex h-14 w-14 items-center justify-center rounded-full bg-blue-600 text-white shadow-xl shadow-blue-600/30 transition-all hover:scale-105 hover:bg-blue-700"
+        className="fixed bottom-[calc(6.75rem+var(--safe-area-bottom))] right-4 z-[80] inline-flex h-14 w-14 items-center justify-center rounded-full bg-blue-600 text-white shadow-xl shadow-blue-600/30 transition-all hover:scale-105 hover:bg-blue-700 md:bottom-[calc(6.25rem+var(--safe-area-bottom))] sm:right-6 lg:bottom-6 lg:right-6"
         aria-label="Schnellerfassung öffnen"
       >
         <Plus size={24} />

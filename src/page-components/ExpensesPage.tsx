@@ -1,4 +1,4 @@
-import { ChangeEvent, useMemo, useRef, useState } from 'react';
+import { ChangeEvent, useEffect, useMemo, useRef, useState } from 'react';
 import {
   Camera,
   ChevronDown,
@@ -74,20 +74,25 @@ const today = () => new Date().toISOString().slice(0, 10);
 
 export function ExpensesPage() {
   const { state, dispatch } = useFinance();
-  const { expenses, settings, currentMonth, budgetLimits, accounts } = state;
+  const { expenses, settings, currentMonth, selectedMonth, budgetLimits, accounts } = state;
   const recognitionRef = useRef<BrowserSpeechRecognition | null>(null);
 
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [receiptModalOpen, setReceiptModalOpen] = useState(false);
   const [voiceModalOpen, setVoiceModalOpen] = useState(false);
   const [editingExpense, setEditingExpense] = useState<Expense | null>(null);
-  const [filterMonth, setFilterMonth] = useState(currentMonth);
+  const [filterMonth, setFilterMonth] = useState(selectedMonth);
   const [filterCategory, setFilterCategory] = useState('all');
   const [filterAccount, setFilterAccount] = useState('all');
   const [filterRecurring, setFilterRecurring] = useState('all');
   const [filtersOpen, setFiltersOpen] = useState(false);
   const [search, setSearch] = useState('');
   const [minAmount, setMinAmount] = useState('');
+
+  // Sync filterMonth with global selectedMonth when header month picker changes
+  useEffect(() => {
+    setFilterMonth(selectedMonth);
+  }, [selectedMonth]);
   const [maxAmount, setMaxAmount] = useState('');
   const [warningsOnly, setWarningsOnly] = useState(false);
 

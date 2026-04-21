@@ -5,6 +5,8 @@ import {
   calculateMonthSummary,
   calculateNetWorth,
   formatCurrency,
+  getActiveBudgetLimits,
+  getBudgetLimitValue,
   getExpenseCategoryInfo,
   getCurrentMonth,
 } from '../utils/helpers';
@@ -42,19 +44,20 @@ export function useNotificationEngine() {
 
     // ── Budget-Warnungen ──
     if (settings.notifications.budgetWarnings) {
-      const monthLimits = budgetLimits.filter(l => l.month === month || l.isRecurring);
+      const monthLimits = getActiveBudgetLimits(budgetLimits, month);
       for (const limit of monthLimits) {
         const spent = expenses
           .filter(e => e.month === month && e.category === limit.category)
           .reduce((sum, e) => sum + e.amount, 0);
-        const pct = limit.monthlyLimit > 0 ? (spent / limit.monthlyLimit) * 100 : 0;
+        const effectiveLimit = getBudgetLimitValue(limit);
+        const pct = effectiveLimit > 0 ? (spent / effectiveLimit) * 100 : 0;
         const info = getExpenseCategoryInfo(limit.category, settings);
 
         if (pct >= 100) {
           addNotification(
             'budget-warning',
             `Budget ${info.labelDe} überschritten`,
-            `Du hast ${formatCurrency(spent, settings)} ausgegeben – ${formatCurrency(spent - limit.monthlyLimit, settings)} über dem Limit von ${formatCurrency(limit.monthlyLimit, settings)}.`,
+            `Du hast ${formatCurrency(spent, settings)} ausgegeben – ${formatCurrency(spent - effectiveLimit, settings)} über dem Limit von ${formatCurrency(effectiveLimit, settings)}.`,
             'AlertTriangle',
             '#ef4444'
           );
@@ -62,7 +65,7 @@ export function useNotificationEngine() {
           addNotification(
             'budget-warning',
             `Budget ${info.labelDe} bei ${Math.round(pct)}%`,
-            `Noch ${formatCurrency(limit.monthlyLimit - spent, settings)} übrig von ${formatCurrency(limit.monthlyLimit, settings)}.`,
+            `Noch ${formatCurrency(effectiveLimit - spent, settings)} übrig von ${formatCurrency(effectiveLimit, settings)}.`,
             'TrendingUp',
             '#f59e0b'
           );

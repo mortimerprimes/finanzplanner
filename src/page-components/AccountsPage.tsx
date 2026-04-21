@@ -315,6 +315,7 @@ export function AccountsPage() {
           isRecurring: false,
           date: draft.date,
           month: draft.date.slice(0, 7),
+          accountId: draft.accountId || undefined,
           note: [draft.note, accountLabel ? `Importkonto: ${accountLabel}` : '', importFileName ? `Quelle: ${importFileName}` : '']
             .filter(Boolean)
             .join(' · ') || undefined,

@@ -5,6 +5,10 @@
   :root {
     --sidebar-width: 260px;
     --sidebar-collapsed: 72px;
+    --safe-area-top: env(safe-area-inset-top, 0px);
+    --safe-area-right: env(safe-area-inset-right, 0px);
+    --safe-area-bottom: env(safe-area-inset-bottom, 0px);
+    --safe-area-left: env(safe-area-inset-left, 0px);
   }
 
   *,
@@ -17,6 +21,7 @@
   body {
     min-height: 100%;
     width: 100%;
+    overscroll-behavior-x: none;
   }
 
   body {
@@ -24,6 +29,8 @@
     line-height: 1.5;
     -webkit-font-smoothing: antialiased;
     -moz-osx-font-smoothing: grayscale;
+    -webkit-text-size-adjust: 100%;
+    text-size-adjust: 100%;
     overflow-x: hidden;
   }
 
@@ -44,10 +51,44 @@
   button {
     cursor: pointer;
   }
+
+  a,
+  button,
+  [role="button"],
+  summary,
+  label {
+    -webkit-tap-highlight-color: transparent;
+    touch-action: manipulation;
+  }
 }
 
 html {
   scroll-behavior: smooth;
+}
+
+@supports (height: 100dvh) {
+  html,
+  body {
+    min-height: 100dvh;
+  }
+}
+
+body.mobile-menu-open {
+  overflow: hidden;
+  touch-action: none;
+}
+
+@media (max-width: 1024px) {
+  input,
+  select,
+  textarea {
+    font-size: 16px;
+  }
+
+  .app-shell {
+    min-height: 100dvh;
+    height: 100dvh;
+  }
 }
 
 /* Custom scrollbar */

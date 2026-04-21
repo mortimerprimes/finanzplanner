@@ -3,7 +3,9 @@
 import { useState } from 'react';
 import { signIn } from 'next-auth/react';
 import { useRouter } from 'next/navigation';
-import { LogIn, Mail, Lock, User, Code2, ArrowLeft, KeyRound, CheckCircle2 } from 'lucide-react';
+import Link from 'next/link';
+import { LogIn, Mail, Lock, Code2, ArrowLeft, KeyRound, CheckCircle2 } from 'lucide-react';
+import { DemoStartButton } from '@/components/DemoStartButton';
 
 type View = 'login' | 'reset-request' | 'reset-code' | 'reset-password' | 'reset-done';
 
@@ -38,12 +40,8 @@ export default function LoginPage() {
         const seconds = result.error.split(':')[1];
         const minutes = Math.ceil(parseInt(seconds || '1800') / 60);
         setError(`Zu viele Versuche. Bitte in ${minutes} Minuten erneut versuchen.`);
-      } else if (result.error.includes('password_too_short')) {
-        setError('Passwort muss mindestens 8 Zeichen lang sein');
-      } else if (result.error.includes('signup_rate_limited')) {
-        setError('Bitte warte kurz bevor du dich erneut registrierst');
-      } else if (result.error.includes('max_users_reached')) {
-        setError('Maximale Benutzeranzahl erreicht');
+      } else if (result.error.includes('no_account_found')) {
+        setError('Kein Konto mit dieser Email gefunden. Bitte zuerst registrieren.');
       } else if (result.error.includes('account_locked')) {
         setError('Dein Konto wurde gesperrt. Kontaktiere den Admin.');
       } else {
@@ -207,13 +205,18 @@ export default function LoginPage() {
     <div className="min-h-screen flex items-center justify-center bg-slate-50 dark:bg-gray-950 p-4">
       <div className="w-full max-w-md">
         {/* Header */}
-        <div className="text-center mb-8">
+        <div className="text-center mb-6">
           <div className="inline-flex items-center justify-center w-16 h-16 rounded-2xl bg-blue-600 text-white text-3xl mb-4">
             💰
           </div>
           <h1 className="text-2xl font-bold text-gray-900 dark:text-white">Finanzplanner</h1>
           <p className="text-slate-500 dark:text-gray-500 mt-1">Dein persönlicher Finanz-Assistent</p>
         </div>
+
+        {/* Demo CTA */}
+        <DemoStartButton className="w-full mb-4 flex items-center justify-center gap-3 px-5 py-4 rounded-2xl bg-gradient-to-r from-blue-600 to-violet-600 text-white font-semibold text-sm hover:opacity-90 transition-opacity shadow-lg shadow-blue-500/25">
+          Demo ausprobieren — echte App mit Beispieldaten
+        </DemoStartButton>
 
         {/* Card */}
         <div className="bg-white dark:bg-gray-900 rounded-2xl border border-slate-200 dark:border-gray-800 p-6 space-y-6">
@@ -301,12 +304,15 @@ export default function LoginPage() {
               className={btnPrimary}
             >
               <LogIn size={16} />
-              {loading ? 'Anmelden...' : 'Anmelden / Registrieren'}
+              {loading ? 'Anmelden...' : 'Anmelden'}
             </button>
           </form>
 
-          <p className="text-xs text-center text-slate-500 dark:text-gray-500">
-            Neues Konto wird automatisch erstellt (min. 8 Zeichen Passwort)
+          <p className="text-sm text-center text-slate-500 dark:text-gray-500">
+            Noch kein Konto?{' '}
+            <Link href="/register" className="text-blue-600 dark:text-blue-400 hover:underline font-medium">
+              Jetzt registrieren
+            </Link>
           </p>
         </div>
       </div>

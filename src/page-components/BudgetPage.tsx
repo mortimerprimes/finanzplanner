@@ -1,7 +1,7 @@
 import { useState, useMemo } from 'react';
 import { useFinance } from '@/lib/finance-context';
 import { Card, Button, Input, Select, Modal, EmptyState, Icon, ProgressBar } from '../components/ui';
-import { formatCurrency, getExpenseCategoryMap, getExpenseCategoryInfo, calculateBudgetRollover } from '../utils/helpers';
+import { formatCurrency, getExpenseCategoryMap, getExpenseCategoryInfo, getActiveBudgetLimits, getBudgetLimitValue } from '../utils/helpers';
 import { BudgetLimit, ExpenseCategory } from '../types';
 import { Pencil, Trash2, AlertTriangle, RotateCcw, CalendarDays } from 'lucide-react';
 
@@ -14,18 +14,22 @@ export function BudgetPage() {
 
   const [category, setCategory] = useState<ExpenseCategory>('food');
   const [amount, setAmount] = useState('');
+  const [isRecurring, setIsRecurring] = useState(true);
   const [enableRollover, setEnableRollover] = useState(false);
   const [showWeekly, setShowWeekly] = useState(false);
 
   const monthExpenses = expenses.filter(e => e.month === currentMonth);
+  const activeBudgets = useMemo(() => getActiveBudgetLimits(budgetLimits, currentMonth), [budgetLimits, currentMonth]);
 
   const openModal = (budget?: BudgetLimit) => {
     if (budget) {
       setEditingBudget(budget);
       setCategory(budget.category); setAmount(budget.amount.toString());
+      setIsRecurring(budget.isRecurring);
       setEnableRollover(budget.enableRollover || false);
     } else {
       setEditingBudget(null); setCategory('food'); setAmount('');
+      setIsRecurring(true);
       setEnableRollover(false);
     }
     setIsModalOpen(true);
@@ -35,7 +39,8 @@ export function BudgetPage() {
 
   const handleSubmit = () => {
     if (!amount) return;
-    const data = { category, amount: parseFloat(amount), monthlyLimit: parseFloat(amount), month: currentMonth, isRecurring: false, enableRollover };
+    const parsedAmount = parseFloat(amount);
+    const data = { category, amount: parsedAmount, monthlyLimit: parsedAmount, month: currentMonth, isRecurring, enableRollover };
     if (editingBudget) dispatch({ type: 'UPDATE_BUDGET_LIMIT', payload: { ...editingBudget, ...data } });
     else dispatch({ type: 'ADD_BUDGET_LIMIT', payload: data });
     closeModal();
@@ -45,13 +50,13 @@ export function BudgetPage() {
 
   const categoryOptions = Object.entries(categoryMap).map(([v, info]) => ({ value: v, label: info.labelDe }));
 
-  const totalBudget = budgetLimits.reduce((s, b) => s + b.amount, 0);
-  const totalSpent = budgetLimits.reduce((s, b) => {
+  const totalBudget = activeBudgets.reduce((sum, budget) => sum + getBudgetLimitValue(budget), 0);
+  const totalSpent = activeBudgets.reduce((s, b) => {
     return s + monthExpenses.filter(e => e.category === b.category).reduce((ss, e) => ss + e.amount, 0);
   }, 0);
 
   // unbudgeted spending
-  const budgetedCategories = new Set(budgetLimits.map(b => b.category));
+  const budgetedCategories = new Set(activeBudgets.map(b => b.category));
   const unbudgetedSpent = monthExpenses.filter(e => !budgetedCategories.has(e.category)).reduce((s, e) => s + e.amount, 0);
 
   return (
@@ -109,17 +114,17 @@ export function BudgetPage() {
         </Card>
       </div>
 
-      {budgetLimits.length === 0 ? (
+      {activeBudgets.length === 0 ? (
         <Card><EmptyState icon="Target" title="Keine Budgetlimits"
           description="Setze Budgetlimits für deine Ausgabenkategorien, um Überausgaben zu vermeiden."
           action={{ label: 'Erstes Budget setzen', onClick: () => openModal() }} /></Card>
       ) : (
         <div className="space-y-4">
-          {budgetLimits.map((budget) => {
-             const catInfo = getExpenseCategoryInfo(budget.category, settings);
+          {activeBudgets.map((budget) => {
+            const catInfo = getExpenseCategoryInfo(budget.category, settings);
             const spent = monthExpenses.filter(e => e.category === budget.category).reduce((s, e) => s + e.amount, 0);
-            const rollover = budget.enableRollover ? calculateBudgetRollover(budget.category, currentMonth, budgetLimits, expenses) : 0;
-            const effectiveBudget = budget.amount + rollover;
+            const rollover = budget.enableRollover ? budget.rolloverAmount || 0 : 0;
+            const effectiveBudget = getBudgetLimitValue(budget);
             const progress = effectiveBudget > 0 ? (spent / effectiveBudget) * 100 : 0;
             const isOver = spent > effectiveBudget;
             const isCritical = progress >= 90 && !isOver;
@@ -137,6 +142,9 @@ export function BudgetPage() {
                       <div className="min-w-0">
                         <div className="flex items-center gap-2 flex-wrap">
                           <h3 className="text-sm font-semibold text-gray-900 dark:text-white truncate">{catInfo.labelDe}</h3>
+                          <span className="inline-flex rounded-full bg-slate-100 px-2 py-0.5 text-[11px] font-medium text-slate-600 dark:bg-gray-800 dark:text-gray-300">
+                            {budget.isRecurring ? 'Wiederkehrend' : getExpenseCategoryInfo(budget.category, settings).labelDe && currentMonth}
+                          </span>
                           {isOver && <span className="inline-flex items-center gap-1 text-xs text-red-600 dark:text-red-400 font-medium">
                             <AlertTriangle size={12} /> Überschritten!
                           </span>}
@@ -198,6 +206,10 @@ export function BudgetPage() {
         <div className="space-y-4">
           <Select label="Kategorie" value={category} onChange={(v) => setCategory(v as ExpenseCategory)} options={categoryOptions} />
           <Input label="Monatliches Budget (€)" type="number" value={amount} onChange={setAmount} placeholder="0.00" icon="Euro" />
+          <label className="flex items-center gap-2 cursor-pointer">
+            <input type="checkbox" checked={isRecurring} onChange={e => setIsRecurring(e.target.checked)} className="h-4 w-4 rounded border-slate-300 text-blue-600 focus:ring-blue-500" />
+            <span className="text-sm text-gray-700 dark:text-gray-300">Als wiederkehrendes Budget-Template speichern</span>
+          </label>
           <label className="flex items-center gap-2 cursor-pointer">
             <input type="checkbox" checked={enableRollover} onChange={e => setEnableRollover(e.target.checked)} className="h-4 w-4 rounded border-slate-300 text-blue-600 focus:ring-blue-500" />
             <span className="text-sm text-gray-700 dark:text-gray-300">Ungenutztes Budget in nächsten Monat übertragen (Rollover)</span>

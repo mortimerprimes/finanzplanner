@@ -16,7 +16,12 @@ const TYPE_ROUTES: Record<string, string> = {
   invoice: '/freelance',
 };
 
-export function GlobalSearch() {
+interface GlobalSearchProps {
+  buttonClassName?: string;
+  iconOnly?: boolean;
+}
+
+export function GlobalSearch({ buttonClassName, iconOnly = false }: GlobalSearchProps) {
   const { state } = useFinance();
   const router = useRouter();
   const [open, setOpen] = useState(false);
@@ -85,11 +90,16 @@ export function GlobalSearch() {
     return (
       <button
         onClick={() => setOpen(true)}
-        className="hidden items-center gap-2 rounded-xl border border-slate-200 bg-white/80 px-3 py-1.5 text-sm text-slate-500 transition-colors hover:bg-slate-100 dark:border-gray-700 dark:bg-gray-800/80 dark:text-gray-400 dark:hover:bg-gray-700 lg:inline-flex"
+        aria-label="Suche öffnen"
+        className={buttonClassName || 'hidden items-center gap-2 rounded-xl border border-slate-200 bg-white/80 px-3 py-1.5 text-sm text-slate-500 transition-colors hover:bg-slate-100 dark:border-gray-700 dark:bg-gray-800/80 dark:text-gray-400 dark:hover:bg-gray-700 lg:inline-flex'}
       >
         <Search size={14} />
-        <span>Suche</span>
-        <kbd className="ml-2 rounded border border-slate-200 px-1.5 py-0.5 text-[10px] font-medium text-slate-400 dark:border-gray-600 dark:text-gray-500">/</kbd>
+        {!iconOnly && (
+          <>
+            <span>Suche</span>
+            <kbd className="ml-2 rounded border border-slate-200 px-1.5 py-0.5 text-[10px] font-medium text-slate-400 dark:border-gray-600 dark:text-gray-500">/</kbd>
+          </>
+        )}
       </button>
     );
   }
@@ -97,7 +107,7 @@ export function GlobalSearch() {
   return (
     <>
       <div className="fixed inset-0 z-[100] bg-black/40 animate-overlay" onClick={() => setOpen(false)} />
-      <div className="fixed left-1/2 top-[15%] z-[101] w-full max-w-lg -translate-x-1/2 animate-fade-in">
+      <div className="fixed left-1/2 top-[calc(4rem+var(--safe-area-top))] z-[101] w-full max-w-lg -translate-x-1/2 animate-fade-in sm:top-[15%]">
         <div className="mx-4 overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-2xl dark:border-gray-700 dark:bg-gray-900">
           <div className="flex items-center gap-3 border-b border-slate-200 px-4 py-3 dark:border-gray-800">
             <Search size={18} className="text-slate-400 dark:text-gray-500" />

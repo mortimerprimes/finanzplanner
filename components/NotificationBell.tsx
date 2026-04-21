@@ -14,13 +14,13 @@ export function NotificationBell() {
   const unreadCount = notifications.filter(n => !n.read).length;
 
   useEffect(() => {
-    function handleClickOutside(event: MouseEvent) {
+    function handleClickOutside(event: PointerEvent) {
       if (panelRef.current && !panelRef.current.contains(event.target as Node)) {
         setOpen(false);
       }
     }
-    if (open) document.addEventListener('mousedown', handleClickOutside);
-    return () => document.removeEventListener('mousedown', handleClickOutside);
+    if (open) document.addEventListener('pointerdown', handleClickOutside);
+    return () => document.removeEventListener('pointerdown', handleClickOutside);
   }, [open]);
 
   const timeAgo = (dateStr: string) => {
@@ -56,7 +56,7 @@ export function NotificationBell() {
       </button>
 
       {open && (
-        <div className="absolute right-0 top-full z-50 mt-2 w-[380px] max-h-[520px] overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-xl dark:border-gray-800 dark:bg-gray-900">
+        <div className="fixed inset-x-2 top-[calc(3.75rem+var(--safe-area-top))] z-50 overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-xl dark:border-gray-800 dark:bg-gray-900 sm:absolute sm:inset-x-auto sm:right-0 sm:top-full sm:mt-2 sm:w-[380px]">
           <div className="flex items-center justify-between border-b border-slate-200 px-4 py-3 dark:border-gray-800">
             <h3 className="text-sm font-bold text-gray-900 dark:text-white">Benachrichtigungen</h3>
             <div className="flex items-center gap-1">
@@ -78,7 +78,7 @@ export function NotificationBell() {
             </div>
           </div>
 
-          <div className="max-h-[440px] overflow-y-auto">
+          <div className="max-h-[calc(100dvh-var(--safe-area-top)-var(--safe-area-bottom)-8rem)] overflow-y-auto sm:max-h-[440px]">
             {notifications.length === 0 ? (
               <div className="px-4 py-12 text-center text-sm text-slate-400 dark:text-gray-600">
                 <Bell size={32} className="mx-auto mb-3 opacity-40" />
@@ -107,7 +107,7 @@ export function NotificationBell() {
                     </div>
                     <button
                       onClick={() => dispatch({ type: 'DISMISS_NOTIFICATION', payload: n.id })}
-                      className="mt-1 shrink-0 rounded p-1 text-slate-400 opacity-0 transition-opacity hover:text-red-500 group-hover:opacity-100"
+                      className="mt-1 shrink-0 rounded p-1 text-slate-400 opacity-100 transition-opacity hover:text-red-500 sm:opacity-0 sm:group-hover:opacity-100"
                     >
                       <X size={12} />
                     </button>

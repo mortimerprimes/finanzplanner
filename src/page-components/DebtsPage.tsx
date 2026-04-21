@@ -18,12 +18,15 @@ function formatMonthsLabel(months: number): string {
 export function DebtsPage() {
   const { state, dispatch } = useFinance();
   const { resolvedTheme } = useTheme();
-  const { debts, settings } = state;
+  const { debts, settings, accounts } = state;
 
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [editingDebt, setEditingDebt] = useState<Debt | null>(null);
   const [paymentDebt, setPaymentDebt] = useState<Debt | null>(null);
   const [paymentAmount, setPaymentAmount] = useState('');
+  const [paymentAccountId, setPaymentAccountId] = useState('');
+  const [paymentDate, setPaymentDate] = useState(new Date().toISOString().slice(0, 10));
+  const [paymentNote, setPaymentNote] = useState('');
   const [selectedScenarioDebtId, setSelectedScenarioDebtId] = useState('');
   const [scenarioExtraMonthly, setScenarioExtraMonthly] = useState('100');
   const [scenarioLumpSum, setScenarioLumpSum] = useState('0');
@@ -57,6 +60,7 @@ export function DebtsPage() {
   const slowestProjection = debtProjections
     .filter((item) => item.debt.remainingAmount > 0 && item.projection.feasible)
     .sort((left, right) => right.projection.months - left.projection.months)[0];
+  const accountOptions = [{ value: '', label: 'Ohne Konto buchen' }, ...accounts.map((account) => ({ value: account.id, label: account.name }))];
 
   // Strategy comparison
   const [showStrategyComparison, setShowStrategyComparison] = useState(false);
@@ -278,9 +282,21 @@ export function DebtsPage() {
 
   const handlePayment = () => {
     if (!paymentDebt || !paymentAmount) return;
-    dispatch({ type: 'MAKE_DEBT_PAYMENT', payload: { id: paymentDebt.id, amount: parseFloat(paymentAmount) } });
+    dispatch({
+      type: 'MAKE_DEBT_PAYMENT',
+      payload: {
+        id: paymentDebt.id,
+        amount: parseFloat(paymentAmount),
+        accountId: paymentAccountId || undefined,
+        date: paymentDate || undefined,
+        note: paymentNote || undefined,
+      },
+    });
     setPaymentDebt(null);
     setPaymentAmount('');
+    setPaymentAccountId('');
+    setPaymentDate(new Date().toISOString().slice(0, 10));
+    setPaymentNote('');
   };
 
   const openDebtCalculator = (debt: Debt) => {
@@ -510,6 +526,9 @@ export function DebtsPage() {
                               onClick={() => {
                                 setPaymentDebt(debt);
                                 setPaymentAmount(debt.monthlyPayment.toString());
+                                setPaymentAccountId('');
+                                setPaymentDate(new Date().toISOString().slice(0, 10));
+                                setPaymentNote('');
                               }}
                               className="rounded-lg p-1.5 transition-colors hover:bg-emerald-50 dark:hover:bg-emerald-950/30"
                               title="Zahlung erfassen"
@@ -797,6 +816,9 @@ export function DebtsPage() {
         <div className="space-y-4">
           <p className="text-sm text-slate-600 dark:text-gray-400">Zahlung für <strong className="text-gray-900 dark:text-white">{paymentDebt?.name}</strong></p>
           <Input label="Zahlungsbetrag (€)" type="number" value={paymentAmount} onChange={setPaymentAmount} placeholder="0.00" icon="Euro" />
+          <Input label="Datum" type="date" value={paymentDate} onChange={setPaymentDate} />
+          <Select label="Belastetes Konto" value={paymentAccountId} onChange={setPaymentAccountId} options={accountOptions} />
+          <Input label="Notiz (optional)" value={paymentNote} onChange={setPaymentNote} placeholder="z.B. Sondertilgung April" />
           <p className="text-xs text-slate-500 dark:text-gray-500">
             Offener Betrag danach: {formatCurrency(Math.max(0, (paymentDebt?.remainingAmount || 0) - parseFloat(paymentAmount || '0')), settings)}
           </p>

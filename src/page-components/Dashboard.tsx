@@ -1,15 +1,19 @@
 import { ReactNode, useState } from 'react';
-import { ArrowDownRight, ArrowUpRight } from 'lucide-react';
+import { useRouter } from 'next/navigation';
+import { ArrowDownRight, ArrowUpRight, ExternalLink } from 'lucide-react';
 import { Pie, PieChart, Cell, ResponsiveContainer, Tooltip } from 'recharts';
 import { useFinance } from '@/lib/finance-context';
 import { useTheme } from '../hooks/useTheme';
 import { Button, Card, EmptyState, Icon, Input, Modal, ProgressBar, Select, StatCard } from '../components/ui';
+import { MonthEndWizard } from '../components/MonthEndWizard';
 import {
   calculatePlannedFreelanceIncomeForMonth,
   calculateMonthSummary,
   calculateNetWorth,
   calculateSavingsProgress,
   formatCurrency,
+  getActiveBudgetLimits,
+  getBudgetLimitValue,
   getExpenseCategoryInfo,
   getExpenseCategoryMap,
   getProgressColor,
@@ -21,6 +25,7 @@ import type { Expense, ExpenseCategory } from '../types';
 export function Dashboard() {
   const { state, dispatch } = useFinance();
   const { resolvedTheme } = useTheme();
+  const router = useRouter();
   const { selectedMonth, incomes, fixedExpenses, debts, expenses, savingsGoals, settings, accounts, budgetLimits, workSessions, freelanceProjects, freelanceInvoices } = state;
   const [editingExpense, setEditingExpense] = useState<Expense | null>(null);
   const [description, setDescription] = useState('');
@@ -29,6 +34,9 @@ export function Dashboard() {
   const [date, setDate] = useState('');
   const [accountId, setAccountId] = useState('');
   const [note, setNote] = useState('');
+  const [showWizard, setShowWizard] = useState(false);
+
+  const isMonthClosed = (state.monthCloses || []).some(mc => mc.month === selectedMonth);
 
   const summary = calculateMonthSummary(selectedMonth, incomes, fixedExpenses, debts, expenses);
   const plannedFreelanceIncome = calculatePlannedFreelanceIncomeForMonth(
@@ -39,13 +47,29 @@ export function Dashboard() {
   );
   const totalSpent = summary.totalFixedExpenses + summary.totalDebtPayments + summary.totalVariableExpenses;
   const netWorth = calculateNetWorth(accounts, debts);
+  const totalAccountBalance = accounts.reduce((sum, account) => sum + account.balance, 0);
+  const liquidBalance = accounts
+    .filter((account) => account.type === 'checking' || account.type === 'savings' || account.type === 'cash')
+    .reduce((sum, account) => sum + account.balance, 0);
+  const mainAccount = accounts.find((account) => account.isDefault) || [...accounts].sort((a, b) => b.balance - a.balance)[0] || null;
+  const positiveAccountBase = Math.max(
+    1,
+    accounts.filter((account) => account.balance > 0).reduce((sum, account) => sum + account.balance, 0)
+  );
+  const topAccounts = [...accounts].sort((a, b) => b.balance - a.balance).slice(0, 4);
+  const accountTypeLabels: Record<string, string> = {
+    checking: 'Girokonto',
+    savings: 'Sparkonto',
+    cash: 'Bargeld',
+    credit: 'Kreditkarte',
+    investment: 'Depot',
+  };
   const activeSavingsGoals = savingsGoals.filter((goal) => !goal.isCompleted).slice(0, 3);
   const recentExpenses = [...expenses]
     .filter((expense) => expense.month === selectedMonth)
     .sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime())
     .slice(0, 5);
-  const getBudgetLimitValue = (limit: { monthlyLimit: number; amount: number }) => (limit.monthlyLimit > 0 ? limit.monthlyLimit : limit.amount);
-  const monthBudgetLimits = budgetLimits.filter((limit) => limit.month === selectedMonth || limit.isRecurring);
+  const monthBudgetLimits = getActiveBudgetLimits(budgetLimits, selectedMonth);
   const totalBudgetLimit = monthBudgetLimits.reduce((sum, limit) => sum + getBudgetLimitValue(limit), 0);
   const totalBudgetSpent = monthBudgetLimits.reduce((sum, limit) => {
     const spent = expenses
@@ -116,6 +140,9 @@ export function Dashboard() {
     borderRadius: '14px',
   };
   const primaryRisk = budgetRisks[0];
+  const topExpenseCategory = pieData.length > 0
+    ? [...pieData].sort((a, b) => b.value - a.value)[0]
+    : null;
   const nextFocus = summary.remaining < 0
     ? 'Du bist diesen Monat im Minus. Priorität: variable Ausgaben und Schuldenrate prüfen.'
     : primaryRisk
@@ -124,10 +151,43 @@ export function Dashboard() {
 
   const widgetSections: Record<string, ReactNode> = {
     summary: (
-      <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-5">
-        <StatCard title="Gesamteinnahmen" value={formatCurrency(summary.totalIncome, settings)} icon="TrendingUp" iconColor="#10b981" iconBg="bg-emerald-50 dark:bg-emerald-950/40" />
-        <StatCard title="Fixkosten" value={formatCurrency(summary.totalFixedExpenses, settings)} icon="Receipt" iconColor="#f59e0b" iconBg="bg-amber-50 dark:bg-amber-950/40" />
-        <StatCard title="Schulden-Tilgung" value={formatCurrency(summary.totalDebtPayments, settings)} icon="CreditCard" iconColor="#ef4444" iconBg="bg-red-50 dark:bg-red-950/40" />
+      <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-3">
+        <StatCard
+          title="Aktueller Kontostand"
+          value={formatCurrency(totalAccountBalance, settings)}
+          subtitle={mainAccount ? `Hauptkonto: ${mainAccount.name}` : 'Noch keine Konten'}
+          icon="Landmark"
+          iconColor="#2563eb"
+          iconBg="bg-blue-50 dark:bg-blue-950/40"
+          onClick={() => router.push('/accounts')}
+        />
+        <StatCard
+          title="Liquide Mittel"
+          value={formatCurrency(liquidBalance, settings)}
+          subtitle="Giro, Sparen und Bargeld"
+          icon="Wallet"
+          iconColor="#0f766e"
+          iconBg="bg-teal-50 dark:bg-teal-950/40"
+          onClick={() => router.push('/accounts')}
+        />
+        <StatCard
+          title="Einnahmen im Monat"
+          value={formatCurrency(summary.totalIncome, settings)}
+          subtitle={plannedFreelanceIncome.total > 0 ? `+ ${formatCurrency(plannedFreelanceIncome.total, settings)} geplant` : 'Alle Einnahmen im Blick'}
+          icon="TrendingUp"
+          iconColor="#10b981"
+          iconBg="bg-emerald-50 dark:bg-emerald-950/40"
+          onClick={() => router.push('/income')}
+        />
+        <StatCard
+          title="Ausgaben im Monat"
+          value={formatCurrency(totalSpent, settings)}
+          subtitle={`${formatCurrency(summary.totalVariableExpenses, settings)} variable Ausgaben`}
+          icon="Receipt"
+          iconColor="#f59e0b"
+          iconBg="bg-amber-50 dark:bg-amber-950/40"
+          onClick={() => router.push('/expenses')}
+        />
         <StatCard
           title="Frei verfügbar"
           value={formatCurrency(freeAvailable, settings)}
@@ -135,13 +195,25 @@ export function Dashboard() {
           icon="Wallet"
           iconColor={freeAvailable >= 0 ? '#10b981' : '#ef4444'}
           iconBg={freeAvailable >= 0 ? 'bg-emerald-50 dark:bg-emerald-950/40' : 'bg-red-50 dark:bg-red-950/40'}
+          onClick={() => router.push('/budget')}
         />
-        <StatCard title="Nettovermögen" value={formatCurrency(netWorth, settings)} subtitle={accounts.length ? `${accounts.length} Konten aktiv` : 'Noch keine Konten'} icon="Landmark" iconColor="#6366f1" iconBg="bg-indigo-50 dark:bg-indigo-950/40" />
+        <StatCard
+          title="Nettovermögen"
+          value={formatCurrency(netWorth, settings)}
+          subtitle={accounts.length ? `${accounts.length} Konten aktiv` : 'Noch keine Konten'}
+          icon="PiggyBank"
+          iconColor="#6366f1"
+          iconBg="bg-indigo-50 dark:bg-indigo-950/40"
+          onClick={() => router.push('/accounts')}
+        />
       </div>
     ),
     budget: (
       <Card className="p-5">
-        <h3 className="mb-4 text-base font-semibold text-gray-900 dark:text-white">Monatsbudget</h3>
+        <button onClick={() => router.push('/budget')} className="mb-4 flex items-center gap-2 text-base font-semibold text-gray-900 dark:text-white hover:text-blue-600 dark:hover:text-blue-400 transition-colors group">
+          Monatsbudget
+          <ExternalLink size={14} className="opacity-0 group-hover:opacity-100 transition-opacity" />
+        </button>
         <div className="space-y-3">
           <div className="flex items-center justify-between text-sm">
             <span className="text-slate-500 dark:text-gray-500">
@@ -172,10 +244,13 @@ export function Dashboard() {
     ),
     'expense-overview': (
       <Card className="p-5">
-        <h3 className="mb-4 text-base font-semibold text-gray-900 dark:text-white">Ausgaben nach Kategorie</h3>
+        <button onClick={() => router.push('/expenses')} className="mb-4 flex items-center gap-2 text-base font-semibold text-gray-900 dark:text-white hover:text-blue-600 dark:hover:text-blue-400 transition-colors group">
+          Ausgaben nach Kategorie
+          <ExternalLink size={14} className="opacity-0 group-hover:opacity-100 transition-opacity" />
+        </button>
         {pieData.length > 0 ? (
           <>
-            <div className="h-56">
+            <div className="h-44 sm:h-52 lg:h-56">
               <ResponsiveContainer width="100%" height="100%">
                 <PieChart>
                   <Pie data={pieData} dataKey="value" innerRadius={55} outerRadius={85} paddingAngle={2}>
@@ -203,13 +278,16 @@ export function Dashboard() {
             </div>
           </>
         ) : (
-          <div className="flex h-56 items-center justify-center text-sm text-slate-400 dark:text-gray-600">Keine Ausgaben in diesem Monat</div>
+          <div className="flex h-44 items-center justify-center text-sm text-slate-400 dark:text-gray-600 sm:h-52 lg:h-56">Keine Ausgaben in diesem Monat</div>
         )}
       </Card>
     ),
     'recent-expenses': (
       <Card className="p-5">
-        <h3 className="mb-4 text-base font-semibold text-gray-900 dark:text-white">Letzte Ausgaben</h3>
+        <button onClick={() => router.push('/expenses')} className="mb-4 flex items-center gap-2 text-base font-semibold text-gray-900 dark:text-white hover:text-blue-600 dark:hover:text-blue-400 transition-colors group">
+          Letzte Ausgaben
+          <ExternalLink size={14} className="opacity-0 group-hover:opacity-100 transition-opacity" />
+        </button>
         {recentExpenses.length > 0 ? (
           <div className="space-y-3">
             {recentExpenses.map((expense) => {
@@ -264,7 +342,10 @@ export function Dashboard() {
     ),
     savings: (
       <Card className="p-5">
-        <h3 className="mb-4 text-base font-semibold text-gray-900 dark:text-white">Sparziele</h3>
+        <button onClick={() => router.push('/savings')} className="mb-4 flex items-center gap-2 text-base font-semibold text-gray-900 dark:text-white hover:text-blue-600 dark:hover:text-blue-400 transition-colors group">
+          Sparziele
+          <ExternalLink size={14} className="opacity-0 group-hover:opacity-100 transition-opacity" />
+        </button>
         {activeSavingsGoals.length > 0 ? (
           <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
             {activeSavingsGoals.map((goal) => {
@@ -295,12 +376,12 @@ export function Dashboard() {
     'quick-stats': (
       <div className="grid grid-cols-2 gap-4 sm:grid-cols-4">
         {[
-          { label: 'Einnahmequellen', value: incomes.filter((income) => income.isRecurring).length },
-          { label: 'Fixkosten', value: fixedExpenses.filter((expense) => expense.isActive).length },
-          { label: 'Offene Schulden', value: debts.filter((debt) => debt.remainingAmount > 0).length },
-          { label: 'Konten', value: accounts.length },
+          { label: 'Einnahmequellen', value: incomes.filter((income) => income.isRecurring).length, href: '/income' },
+          { label: 'Fixkosten', value: fixedExpenses.filter((expense) => expense.isActive).length, href: '/fixed-expenses' },
+          { label: 'Offene Schulden', value: debts.filter((debt) => debt.remainingAmount > 0).length, href: '/debts' },
+          { label: 'Konten', value: accounts.length, href: '/accounts' },
         ].map((item) => (
-          <Card key={item.label} className="p-4 text-center">
+          <Card key={item.label} className="p-4 text-center cursor-pointer transition-shadow hover:shadow-md hover:ring-1 hover:ring-blue-200 dark:hover:ring-blue-800" onClick={() => router.push(item.href)}>
             <p className="text-xs font-medium text-slate-500 dark:text-gray-500">{item.label}</p>
             <p className="mt-1 text-2xl font-bold text-gray-900 dark:text-white">{item.value}</p>
           </Card>
@@ -330,7 +411,10 @@ export function Dashboard() {
 
       return (
         <Card className="p-5">
-          <h3 className="mb-4 text-base font-semibold text-gray-900 dark:text-white">Monatsvergleich</h3>
+          <button onClick={() => router.push('/analytics')} className="mb-4 flex items-center gap-2 text-base font-semibold text-gray-900 dark:text-white hover:text-blue-600 dark:hover:text-blue-400 transition-colors group">
+            Monatsvergleich
+            <ExternalLink size={14} className="opacity-0 group-hover:opacity-100 transition-opacity" />
+          </button>
           <div className="mb-4 flex flex-wrap items-center gap-3">
             <div className={`inline-flex items-center gap-2 rounded-xl px-3 py-2 text-sm font-semibold ${
               less
@@ -383,7 +467,10 @@ export function Dashboard() {
 
       return (
         <Card className="p-5">
-          <h3 className="mb-4 text-base font-semibold text-gray-900 dark:text-white">Monatsend-Prognose</h3>
+          <button onClick={() => router.push('/analytics')} className="mb-4 flex items-center gap-2 text-base font-semibold text-gray-900 dark:text-white hover:text-blue-600 dark:hover:text-blue-400 transition-colors group">
+            Monatsend-Prognose
+            <ExternalLink size={14} className="opacity-0 group-hover:opacity-100 transition-opacity" />
+          </button>
           <div className="mb-4 rounded-2xl border border-slate-200 bg-slate-50 p-4 dark:border-gray-800 dark:bg-gray-800/30">
             <p className="text-sm text-slate-600 dark:text-gray-400">
               Bei aktuellem Tempo ({formatCurrency(dailyRate, settings)}/Tag) wirst du Ende Monat
@@ -433,44 +520,80 @@ export function Dashboard() {
             <div className="flex flex-wrap items-center gap-2">
               <span className="inline-flex items-center gap-2 rounded-full bg-white/10 px-3 py-1 text-xs font-semibold text-white/90 backdrop-blur">
                 <Icon name="Sparkles" size={14} className="text-cyan-300" />
-                Monatsstatus {selectedMonth}
+                Heute im Blick · {selectedMonth}
               </span>
               <span className="inline-flex items-center gap-2 rounded-full bg-emerald-400/15 px-3 py-1 text-xs font-semibold text-emerald-200">
-                {freeAvailable >= 0 ? 'Stabiler Cashflow' : 'Budget anpassen'}
+                {accounts.length > 0 ? `${accounts.length} Konten aktiv` : 'Konten einrichten'}
               </span>
+              <button
+                onClick={() => setShowWizard(true)}
+                className={`inline-flex items-center gap-2 rounded-full px-3 py-1 text-xs font-semibold backdrop-blur transition-colors ${isMonthClosed ? 'bg-emerald-400/15 text-emerald-200 hover:bg-emerald-400/25' : 'bg-amber-400/15 text-amber-200 hover:bg-amber-400/25'}`}
+              >
+                <Icon name={isMonthClosed ? 'CheckCircle2' : 'ClipboardCheck'} size={14} />
+                {isMonthClosed ? 'Abgeschlossen' : 'Monatsabschluss'}
+              </button>
             </div>
 
             <div>
-              <p className="text-sm text-slate-300">Frei verfügbar in diesem Monat</p>
+              <p className="text-sm text-slate-300">Aktueller Kontostand</p>
               <h2 className="mt-2 text-4xl font-bold tracking-tight sm:text-5xl">
-                {formatCurrency(freeAvailable, settings)}
+                {formatCurrency(totalAccountBalance, settings)}
               </h2>
-              <div className="mt-3 inline-flex max-w-full items-center gap-2 rounded-2xl border border-violet-400/20 bg-violet-400/10 px-3 py-2 text-sm text-violet-100">
-                <Icon name="Briefcase" size={16} className="shrink-0 text-violet-200" />
-                <span className="truncate">
-                  Geplante Freelance-Einnahmen: <span className="font-semibold text-white">{formatCurrency(plannedFreelanceIncome.total, settings)}</span>
-                </span>
+              <div className="mt-3 flex flex-wrap gap-2 text-sm">
+                <div className="inline-flex max-w-full items-center gap-2 rounded-2xl border border-cyan-400/20 bg-cyan-400/10 px-3 py-2 text-cyan-100">
+                  <Icon name="Wallet" size={16} className="shrink-0 text-cyan-200" />
+                  <span className="truncate">
+                    Liquide Mittel: <span className="font-semibold text-white">{formatCurrency(liquidBalance, settings)}</span>
+                  </span>
+                </div>
+                {mainAccount && (
+                  <div className="inline-flex max-w-full items-center gap-2 rounded-2xl border border-white/15 bg-white/8 px-3 py-2 text-slate-100">
+                    <Icon name="Landmark" size={16} className="shrink-0 text-white/80" />
+                    <span className="truncate">
+                      Hauptkonto: <span className="font-semibold text-white">{mainAccount.name}</span>
+                    </span>
+                  </div>
+                )}
               </div>
               <p className="mt-3 max-w-xl text-sm text-slate-300">
-                {totalBudgetLimit > 0
-                  ? `Nach Fixkosten, Schulden und deiner offenen Budget-Reserve von ${formatCurrency(reservedBudget, settings)} bleiben dir aktuell ${formatCurrency(freeAvailable, settings)} frei.`
-                  : nextFocus}
+                {accounts.length > 0
+                  ? `Von deinem aktuellen Kontostand sind ${formatCurrency(freeAvailable, settings)} in diesem Monat frei verfügbar. ${totalBudgetLimit > 0 ? `${formatCurrency(reservedBudget, settings)} bleiben dabei als Budget-Reserve eingeplant.` : 'Setze Budgets, damit deine Reserve noch genauer geplant wird.'}`
+                  : 'Lege Konten an, damit dein Dashboard Kontostand, Liquidität und Nettovermögen automatisch zusammenfasst.'}
               </p>
             </div>
 
             <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-4">
               {[
-                { label: 'Einnahmen', value: formatCurrency(summary.totalIncome, settings), tone: 'bg-white/8 text-white' },
+                { label: 'Diesen Monat rein', value: formatCurrency(summary.totalIncome, settings), tone: 'bg-white/8 text-white', href: '/income', sublabel: 'Alle Einnahmen im aktuellen Monat' },
                 {
-                  label: 'Geplante Freelance-Einnahmen',
-                  value: formatCurrency(plannedFreelanceIncome.total, settings),
-                  tone: 'bg-violet-500/15 text-violet-50',
-                  sublabel: `${plannedFreelanceIncome.sessionCount} Einträge · ${plannedFreelanceIncome.openInvoiceCount} Rechnungen`,
+                  label: 'Bisher ausgegeben',
+                  value: formatCurrency(totalSpent, settings),
+                  tone: 'bg-slate-50/10 text-slate-50',
+                  sublabel: `${formatCurrency(summary.totalVariableExpenses, settings)} variabel`,
+                  href: '/expenses',
                 },
-                { label: 'Restbudget', value: formatCurrency(reservedBudget, settings), tone: 'bg-amber-400/15 text-amber-50', sublabel: totalBudgetLimit > 0 ? 'Noch für Essen, Tanken usw. reserviert' : 'Noch keine Budget-Töpfe gesetzt' },
-                { label: 'Frei verfügbar', value: formatCurrency(freeAvailable, settings), tone: freeAvailable >= 0 ? 'bg-emerald-400/15 text-emerald-100' : 'bg-red-400/15 text-red-100', sublabel: 'Nach Budget-Reserve' },
+                {
+                  label: 'Restbudget',
+                  value: formatCurrency(budgetRemaining, settings),
+                  tone: budgetRemaining >= 0 ? 'bg-amber-400/15 text-amber-50' : 'bg-red-400/15 text-red-100',
+                  sublabel: totalBudgetLimit > 0 ? 'Noch in deinen Budget-Töpfen verfügbar' : 'Noch keine Budget-Töpfe gesetzt',
+                  href: '/budget',
+                },
+                {
+                  label: 'Frei verfügbar',
+                  value: formatCurrency(freeAvailable, settings),
+                  tone: freeAvailable >= 0 ? 'bg-emerald-400/15 text-emerald-100' : 'bg-red-400/15 text-red-100',
+                  sublabel: plannedFreelanceIncome.total > 0
+                    ? `+ ${formatCurrency(plannedFreelanceIncome.total, settings)} Freelance geplant`
+                    : 'Nach Budget-Reserve',
+                  href: '/budget',
+                },
               ].map((item) => (
-                <div key={item.label} className={`rounded-2xl border border-white/10 px-4 py-4 backdrop-blur ${item.tone}`}>
+                <div
+                  key={item.label}
+                  onClick={() => router.push(item.href)}
+                  className={`rounded-2xl border border-white/10 px-4 py-4 backdrop-blur cursor-pointer transition-all hover:border-white/30 hover:bg-white/12 ${item.tone}`}
+                >
                   <p className="text-xs font-medium text-white/70">{item.label}</p>
                   <p className="mt-2 text-xl font-semibold">{item.value}</p>
                   {'sublabel' in item && item.sublabel ? (
@@ -483,42 +606,50 @@ export function Dashboard() {
 
           <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-1">
             <div className="rounded-3xl border border-white/10 bg-white/8 p-5 backdrop-blur">
-              <div className="flex items-center justify-between gap-3">
+              <div className="flex items-start justify-between gap-3">
                 <div>
-                  <p className="text-xs font-medium text-slate-300">Budgetauslastung</p>
-                  <p className="mt-1 text-2xl font-bold">{budgetUsage.toFixed(0)}%</p>
+                  <p className="text-xs font-medium text-slate-300">Monatslage</p>
+                  <p className="mt-1 text-2xl font-bold">{freeAvailable >= 0 ? 'Im Plan' : 'Nachsteuern'}</p>
                   <p className="mt-1 text-xs text-slate-300">
                     {totalBudgetLimit > 0
-                      ? `${formatCurrency(totalBudgetSpent, settings)} von ${formatCurrency(totalBudgetLimit, settings)} genutzt`
-                      : 'Noch kein Monatsbudget gesetzt'}
+                      ? `${formatCurrency(totalBudgetSpent, settings)} von ${formatCurrency(totalBudgetLimit, settings)} Budget genutzt`
+                      : `${formatCurrency(totalSpent, settings)} Ausgaben im Monat bisher`}
                   </p>
                 </div>
                 <div className="rounded-2xl bg-white/10 p-3">
-                  <Icon name="Target" size={18} className="text-cyan-300" />
+                  <Icon name={freeAvailable >= 0 ? 'BadgeCheck' : 'AlertTriangle'} size={18} className="text-cyan-300" />
                 </div>
               </div>
-              <div className="mt-4">
+              <div className="mt-4 space-y-3">
+                {[
+                  { label: 'Einnahmen', value: formatCurrency(summary.totalIncome, settings) },
+                  { label: 'Ausgaben gesamt', value: formatCurrency(totalSpent, settings) },
+                  { label: 'Frei verfügbar', value: formatCurrency(freeAvailable, settings), tone: freeAvailable >= 0 ? 'text-emerald-200' : 'text-red-200' },
+                ].map((item) => (
+                  <div key={item.label} className="flex items-center justify-between rounded-2xl bg-white/8 px-3 py-3">
+                    <span className="text-sm text-slate-300">{item.label}</span>
+                    <span className={`text-sm font-semibold text-white ${item.tone || ''}`}>{item.value}</span>
+                  </div>
+                ))}
                 <ProgressBar value={budgetUsage} max={100} color={summary.remaining >= 0 ? '#38bdf8' : '#fb7185'} size="lg" />
               </div>
             </div>
 
             <div className="rounded-3xl border border-white/10 bg-white/8 p-5 backdrop-blur">
-              <p className="text-xs font-medium text-slate-300">Frei verfügbar</p>
+              <p className="text-xs font-medium text-slate-300">Nächster Fokus</p>
               <div className="mt-3 space-y-2">
                 <div className="rounded-2xl bg-white/8 px-3 py-3">
-                  <p className="text-sm font-semibold text-white">Nach Budget-Reserve</p>
-                  <p className="mt-1 text-xs text-slate-300">
-                    {formatCurrency(freeAvailable, settings)} bleiben dir aktuell flexibel zur freien Verwendung.
-                  </p>
+                  <p className="text-sm font-semibold text-white">Worauf du achten solltest</p>
+                  <p className="mt-1 text-xs text-slate-300">{nextFocus}</p>
                 </div>
                 <div className="rounded-2xl bg-white/8 px-3 py-3">
-                  <p className="text-sm font-semibold text-white">{primaryRisk ? 'Aktuell kritisch' : 'Budget-Reserve'}</p>
+                  <p className="text-sm font-semibold text-white">Schneller Überblick</p>
                   <p className="mt-1 text-xs text-slate-300">
-                    {primaryRisk
-                      ? `${getExpenseCategoryInfo(primaryRisk.category, settings).labelDe} liegt bei ${primaryRisk.percentage.toFixed(0)}% deines Limits.`
-                      : totalBudgetLimit > 0
-                        ? `${formatCurrency(reservedBudget, settings)} sind für deine gesetzten Budget-Töpfe noch eingeplant.`
-                        : 'Sobald du Budgets wie Essen oder Tanken setzt, wird hier deine Reserve berücksichtigt.'}
+                    {topExpenseCategory
+                      ? `Größter Ausgabenblock aktuell: ${topExpenseCategory.name} mit ${formatCurrency(topExpenseCategory.value, settings)}.`
+                      : activeSavingsGoals.length > 0
+                        ? `${activeSavingsGoals.length} aktive Sparziele warten auf deinen nächsten Schritt.`
+                        : 'Noch keine Ausgaben oder Sparziele vorhanden. Sobald Daten da sind, zeigt dir das Dashboard hier die Prioritäten.'}
                   </p>
                 </div>
               </div>
@@ -528,8 +659,90 @@ export function Dashboard() {
       </Card>
 
       <Card className="p-5">
+        <div className="mb-4 flex items-center justify-between gap-3">
+          <button onClick={() => router.push('/accounts')} className="flex items-center gap-2 text-base font-semibold text-gray-900 dark:text-white hover:text-blue-600 dark:hover:text-blue-400 transition-colors group">
+            Konten auf einen Blick
+            <ExternalLink size={14} className="opacity-0 group-hover:opacity-100 transition-opacity" />
+          </button>
+          <span className="text-sm text-slate-500 dark:text-gray-500">
+            {accounts.length > 0 ? `${accounts.length} Konten` : 'Noch keine Konten'}
+          </span>
+        </div>
+
+        {accounts.length > 0 ? (
+          <div className="grid grid-cols-1 gap-4 xl:grid-cols-[0.95fr_1.05fr]">
+            <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-1">
+              <div className="rounded-2xl bg-slate-50 p-4 dark:bg-gray-800/40">
+                <p className="text-xs font-medium text-slate-500 dark:text-gray-500">Aktueller Kontostand</p>
+                <p className="mt-1 text-2xl font-bold text-gray-900 dark:text-white">{formatCurrency(totalAccountBalance, settings)}</p>
+                <p className="mt-1 text-xs text-slate-500 dark:text-gray-500">Summe aller Konten inklusive Kredit- und Depotstände</p>
+              </div>
+              <div className="rounded-2xl bg-slate-50 p-4 dark:bg-gray-800/40">
+                <p className="text-xs font-medium text-slate-500 dark:text-gray-500">Liquide Mittel</p>
+                <p className="mt-1 text-2xl font-bold text-gray-900 dark:text-white">{formatCurrency(liquidBalance, settings)}</p>
+                <p className="mt-1 text-xs text-slate-500 dark:text-gray-500">Direkt verfügbares Geld ohne Depotwerte</p>
+              </div>
+              <div className="rounded-2xl border border-slate-200 p-4 dark:border-gray-800 sm:col-span-2 xl:col-span-1">
+                <div className="flex items-start justify-between gap-3">
+                  <div>
+                    <p className="text-xs font-medium text-slate-500 dark:text-gray-500">Hauptkonto</p>
+                    <p className="mt-1 text-lg font-bold text-gray-900 dark:text-white">{mainAccount?.name || 'Kein Standardkonto gesetzt'}</p>
+                    <p className="mt-1 text-xs text-slate-500 dark:text-gray-500">{mainAccount ? accountTypeLabels[mainAccount.type] || mainAccount.type : 'Lege in den Konten ein Standardkonto fest.'}</p>
+                  </div>
+                  {mainAccount && (
+                    <div className="rounded-xl px-3 py-2 text-sm font-semibold" style={{ backgroundColor: `${mainAccount.color}18`, color: mainAccount.color }}>
+                      {formatCurrency(mainAccount.balance, settings)}
+                    </div>
+                  )}
+                </div>
+              </div>
+            </div>
+
+            <div className="space-y-3">
+              {topAccounts.map((account) => {
+                const share = account.balance > 0 ? (account.balance / positiveAccountBase) * 100 : 0;
+                return (
+                  <div key={account.id} className="rounded-2xl border border-slate-200 p-4 dark:border-gray-800">
+                    <div className="flex items-start justify-between gap-3">
+                      <div className="min-w-0">
+                        <div className="flex flex-wrap items-center gap-2">
+                          <p className="truncate text-sm font-semibold text-gray-900 dark:text-white">{account.name}</p>
+                          {account.isDefault && (
+                            <span className="rounded-full bg-blue-50 px-2 py-0.5 text-[10px] font-semibold text-blue-700 dark:bg-blue-950/40 dark:text-blue-300">
+                              Standard
+                            </span>
+                          )}
+                        </div>
+                        <p className="mt-1 text-xs text-slate-500 dark:text-gray-500">{accountTypeLabels[account.type] || account.type}</p>
+                      </div>
+                      <div className="text-right">
+                        <p className={`text-sm font-bold ${account.balance >= 0 ? 'text-gray-900 dark:text-white' : 'text-red-600 dark:text-red-400'}`}>
+                          {formatCurrency(account.balance, settings)}
+                        </p>
+                        <p className="mt-1 text-[11px] text-slate-500 dark:text-gray-500">
+                          {account.balance > 0 ? `${share.toFixed(0)}% vom Guthaben` : 'Belastung auf diesem Konto'}
+                        </p>
+                      </div>
+                    </div>
+                    <div className="mt-3">
+                      <ProgressBar value={share} max={100} color={account.color} size="sm" />
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        ) : (
+          <EmptyState icon="Landmark" title="Noch keine Konten angelegt" description="Sobald du deine Konten erfasst, zeigt dir das Dashboard hier den aktuellen Kontostand und die Verteilung." />
+        )}
+      </Card>
+
+      <Card className="p-5">
         <div className="mb-3 flex items-center justify-between">
-          <h3 className="text-base font-semibold text-gray-900 dark:text-white">Budget-Überblick</h3>
+          <button onClick={() => router.push('/budget')} className="flex items-center gap-2 text-base font-semibold text-gray-900 dark:text-white hover:text-blue-600 dark:hover:text-blue-400 transition-colors group">
+            Budget-Überblick
+            <ExternalLink size={14} className="opacity-0 group-hover:opacity-100 transition-opacity" />
+          </button>
           <span className={`text-sm font-semibold ${budgetRemaining >= 0 ? 'text-emerald-600 dark:text-emerald-400' : 'text-red-600 dark:text-red-400'}`}>
             {budgetRemaining >= 0 ? 'Im Rahmen' : 'Über Budget'}
           </span>
@@ -659,6 +872,8 @@ export function Dashboard() {
           </div>
         </div>
       </Modal>
+
+      <MonthEndWizard isOpen={showWizard} onClose={() => setShowWizard(false)} />
     </div>
   );
 }
