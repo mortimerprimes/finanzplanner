@@ -126,6 +126,31 @@ function isImportedExpense(expense: Pick<Expense, 'tags'>): boolean {
   return Boolean(expense.tags?.includes('bankimport') || expense.tags?.includes('banksync'));
 }
 
+function canBeDefaultAccount(account: Pick<Account, 'type'>): boolean {
+  return account.type !== 'investment';
+}
+
+function isLiquidAccount(account: Pick<Account, 'type'>): boolean {
+  return account.type === 'checking' || account.type === 'savings' || account.type === 'cash';
+}
+
+function normalizeDefaultAccounts(accounts: Account[], requestedDefaultId?: string): Account[] {
+  const defaultAccountId = (
+    (requestedDefaultId
+      ? accounts.find((account) => account.id === requestedDefaultId && canBeDefaultAccount(account))?.id
+      : undefined)
+    || accounts.find((account) => account.isDefault && canBeDefaultAccount(account))?.id
+    || accounts.find((account) => isLiquidAccount(account))?.id
+    || accounts.find((account) => canBeDefaultAccount(account))?.id
+    || null
+  );
+
+  return accounts.map((account) => ({
+    ...account,
+    isDefault: defaultAccountId === account.id,
+  }));
+}
+
 function withIncomeAccountTracking<T extends Pick<Income, 'accountId' | 'isRecurring'>>(income: T): T & { affectsAccountBalance: boolean } {
   return {
     ...income,
@@ -479,9 +504,11 @@ function financeReducer(state: FinanceState, action: Action): FinanceState {
 
   switch (action.type) {
     case 'SET_STATE': {
+      const nextAccounts = normalizeDefaultAccounts(action.payload.accounts || state.accounts);
       const nextState = {
         ...state,
         ...action.payload,
+        accounts: nextAccounts,
         accountRules: action.payload.accountRules || state.accountRules || [],
         undoStack: state.undoStack || [],
         activityLog: action.payload.activityLog || state.activityLog || [],
@@ -719,11 +746,29 @@ function financeReducer(state: FinanceState, action: Action): FinanceState {
       return { ...state, budgetLimits: state.budgetLimits.filter(b => b.id !== action.payload) };
 
     case 'ADD_ACCOUNT':
-      return { ...state, accounts: [...state.accounts, { ...action.payload, id: generateId(), createdAt: now }] };
+      {
+        const nextAccount = { ...action.payload, id: generateId(), createdAt: now };
+        return {
+          ...state,
+          accounts: normalizeDefaultAccounts(
+            [...state.accounts, nextAccount],
+            nextAccount.isDefault ? nextAccount.id : undefined
+          ),
+        };
+      }
     case 'UPDATE_ACCOUNT':
-      return { ...state, accounts: state.accounts.map(a => a.id === action.payload.id ? action.payload : a) };
+      return {
+        ...state,
+        accounts: normalizeDefaultAccounts(
+          state.accounts.map((account) => account.id === action.payload.id ? action.payload : account),
+          action.payload.isDefault ? action.payload.id : undefined
+        ),
+      };
     case 'DELETE_ACCOUNT':
-      return { ...state, accounts: state.accounts.filter(a => a.id !== action.payload) };
+      return {
+        ...state,
+        accounts: normalizeDefaultAccounts(state.accounts.filter((account) => account.id !== action.payload)),
+      };
 
     case 'ADD_TRANSFER': {
       const transfer = { ...action.payload, id: generateId(), createdAt: now };
@@ -1101,9 +1146,11 @@ function financeReducer(state: FinanceState, action: Action): FinanceState {
       return { ...state, monthCloses: (state.monthCloses || []).filter(mc => mc.id !== action.payload) };
 
     case 'IMPORT_DATA': {
+      const nextAccounts = normalizeDefaultAccounts(action.payload.accounts || state.accounts);
       const nextState = {
         ...state,
         ...action.payload,
+        accounts: nextAccounts,
         settings: {
           ...DEFAULT_SETTINGS,
           ...action.payload.settings,

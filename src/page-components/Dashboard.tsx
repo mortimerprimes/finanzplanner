@@ -52,10 +52,27 @@ export function Dashboard() {
     : totalSpent > 0 ? 100 : 0;
   const netWorth = calculateNetWorth(accounts, debts);
   const totalAccountBalance = accounts.reduce((sum, account) => sum + account.balance, 0);
+  const liquidAccounts = accounts.filter(
+    (account) => account.type === 'checking' || account.type === 'savings' || account.type === 'cash'
+  );
+  const nonInvestmentAccounts = accounts.filter((account) => account.type !== 'investment');
   const liquidBalance = accounts
     .filter((account) => account.type === 'checking' || account.type === 'savings' || account.type === 'cash')
     .reduce((sum, account) => sum + account.balance, 0);
-  const mainAccount = accounts.find((account) => account.isDefault) || [...accounts].sort((a, b) => b.balance - a.balance)[0] || null;
+  const mainAccount =
+    liquidAccounts.find((account) => account.isDefault)
+    || nonInvestmentAccounts.find((account) => account.isDefault)
+    || [...liquidAccounts].sort((a, b) => b.balance - a.balance)[0]
+    || [...nonInvestmentAccounts].sort((a, b) => b.balance - a.balance)[0]
+    || accounts.find((account) => account.isDefault)
+    || [...accounts].sort((a, b) => b.balance - a.balance)[0]
+    || null;
+  const headlineBalance = mainAccount
+    ? mainAccount.balance
+    : (liquidAccounts.length > 0 ? liquidBalance : totalAccountBalance);
+  const headlineLabel = mainAccount
+    ? 'Kontostand Hauptkonto'
+    : (liquidAccounts.length > 0 ? 'Liquider Kontostand' : 'Gesamtkontostand');
   const positiveAccountBase = Math.max(
     1,
     accounts.filter((account) => account.balance > 0).reduce((sum, account) => sum + account.balance, 0)
@@ -539,9 +556,9 @@ export function Dashboard() {
             </div>
 
             <div>
-              <p className="text-sm text-slate-300">Aktueller Kontostand</p>
+              <p className="text-sm text-slate-300">{headlineLabel}</p>
               <h2 className="mt-2 text-4xl font-bold tracking-tight sm:text-5xl">
-                {formatCurrency(totalAccountBalance, settings)}
+                {formatCurrency(headlineBalance, settings)}
               </h2>
               <div className="mt-3 flex flex-wrap gap-2 text-sm">
                 <div className="inline-flex max-w-full items-center gap-2 rounded-2xl border border-cyan-400/20 bg-cyan-400/10 px-3 py-2 text-cyan-100">
@@ -561,7 +578,7 @@ export function Dashboard() {
               </div>
               <p className="mt-3 max-w-xl text-sm text-slate-300">
                 {accounts.length > 0
-                  ? `Von deinem aktuellen Kontostand sind ${formatCurrency(freeAvailable, settings)} in diesem Monat frei verfügbar. ${totalBudgetLimit > 0 ? `${formatCurrency(reservedBudget, settings)} bleiben dabei als Budget-Reserve eingeplant.` : 'Setze Budgets, damit deine Reserve noch genauer geplant wird.'}`
+                  ? `${formatCurrency(freeAvailable, settings)} sind in diesem Monat frei verfügbar. ${accounts.length > 1 ? `Über alle Konten hinweg liegst du aktuell bei ${formatCurrency(totalAccountBalance, settings)}.` : ''} ${totalBudgetLimit > 0 ? `${formatCurrency(reservedBudget, settings)} bleiben dabei als Budget-Reserve eingeplant.` : 'Setze Budgets, damit deine Reserve noch genauer geplant wird.'}`
                   : 'Lege Konten an, damit dein Dashboard Kontostand, Liquidität und Nettovermögen automatisch zusammenfasst.'}
               </p>
             </div>

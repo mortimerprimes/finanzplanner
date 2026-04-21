@@ -1,5 +1,5 @@
 import { ChangeEvent, useMemo, useState } from 'react';
-import { BrainCircuit, FileSpreadsheet, Pencil, Sparkles, Trash2, Upload, WalletCards } from 'lucide-react';
+import { BrainCircuit, CheckCircle2, FileSpreadsheet, Pencil, Sparkles, Trash2, Upload, WalletCards } from 'lucide-react';
 import { useFinance } from '@/lib/finance-context';
 import { Card, Button, Input, Modal, Select, EmptyState, Icon, Badge } from '../components/ui';
 import { ACCOUNT_TYPES, INCOME_TYPES, UI_COLORS } from '../utils/constants';
@@ -37,6 +37,7 @@ export function AccountsPage() {
   const [type, setType] = useState<AccountType>('checking');
   const [color, setColor] = useState(UI_COLORS[0]);
   const [note, setNote] = useState('');
+  const [isDefault, setIsDefault] = useState(false);
   const [billingCycleDay, setBillingCycleDay] = useState('');
   const [paymentDueDay, setPaymentDueDay] = useState('');
 
@@ -106,6 +107,7 @@ export function AccountsPage() {
       setType(account.type);
       setColor(account.color);
       setNote(account.note || '');
+      setIsDefault(account.isDefault);
       setBillingCycleDay(account.billingCycleDay?.toString() || '');
       setPaymentDueDay(account.paymentDueDay?.toString() || '');
     } else {
@@ -115,6 +117,7 @@ export function AccountsPage() {
       setType('checking');
       setColor(UI_COLORS[0]);
       setNote('');
+      setIsDefault(accounts.length === 0);
       setBillingCycleDay('');
       setPaymentDueDay('');
     }
@@ -130,13 +133,14 @@ export function AccountsPage() {
     if (!name || !balance) return;
 
     const accountTypeInfo = ACCOUNT_TYPES[type];
+    const nextIsDefault = type === 'investment' ? false : isDefault;
     const payload = {
       name,
       type,
       balance: parseFloat(balance),
       color,
       icon: accountTypeInfo.icon,
-      isDefault: editingAccount?.isDefault ?? accounts.length === 0,
+      isDefault: nextIsDefault,
       note: note || undefined,
       billingCycleDay: billingCycleDay ? parseInt(billingCycleDay) : undefined,
       paymentDueDay: paymentDueDay ? parseInt(paymentDueDay) : undefined,
@@ -149,6 +153,14 @@ export function AccountsPage() {
     }
 
     closeAccountModal();
+  };
+
+  const handleTypeChange = (value: string) => {
+    const nextType = value as AccountType;
+    setType(nextType);
+    if (nextType === 'investment') {
+      setIsDefault(false);
+    }
   };
 
   const handleDeleteAccount = (id: string) => {
@@ -405,6 +417,15 @@ export function AccountsPage() {
                         {formatCurrency(account.balance, settings)}
                       </p>
                       <div className="flex gap-1">
+                        {account.type !== 'investment' && (
+                          <button
+                            onClick={() => dispatch({ type: 'UPDATE_ACCOUNT', payload: { ...account, isDefault: true } })}
+                            className={`rounded-lg p-1.5 transition-colors ${account.isDefault ? 'bg-emerald-50 dark:bg-emerald-950/30' : 'hover:bg-slate-100 dark:hover:bg-gray-800'}`}
+                            title={account.isDefault ? 'Aktuelles Hauptkonto' : 'Als Hauptkonto setzen'}
+                          >
+                            <CheckCircle2 size={15} className={account.isDefault ? 'text-emerald-500' : 'text-slate-400'} />
+                          </button>
+                        )}
                         <button onClick={() => openAccountModal(account)} className="rounded-lg p-1.5 transition-colors hover:bg-slate-100 dark:hover:bg-gray-800">
                           <Pencil size={15} className="text-slate-400" />
                         </button>
@@ -486,8 +507,26 @@ export function AccountsPage() {
         <div className="space-y-4">
           <Input label="Kontoname" value={name} onChange={setName} placeholder="z.B. Girokonto, Tagesgeld, Depot" icon="Wallet" />
           <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-            <Select label="Kontotyp" value={type} onChange={(value) => setType(value as AccountType)} options={typeOptions} />
+            <Select label="Kontotyp" value={type} onChange={handleTypeChange} options={typeOptions} />
             <Input label="Aktueller Kontostand" type="number" value={balance} onChange={setBalance} placeholder="0.00" icon="Euro" />
+          </div>
+          <div className="rounded-2xl border border-slate-200 p-4 dark:border-gray-800">
+            <label className={`flex items-start gap-3 ${type === 'investment' ? 'opacity-60' : ''}`}>
+              <input
+                type="checkbox"
+                checked={type === 'investment' ? false : isDefault}
+                onChange={(event) => setIsDefault(event.target.checked)}
+                disabled={type === 'investment'}
+                className="mt-1 h-4 w-4 rounded border-slate-300 text-blue-600 focus:ring-blue-500"
+              />
+              <span>
+                <span className="block text-sm font-medium text-gray-900 dark:text-white">Als Hauptkonto verwenden</span>
+                <span className="mt-1 block text-xs text-slate-500 dark:text-gray-500">
+                  Dieses Konto wird im Dashboard als Hauptkonto priorisiert.
+                  {type === 'investment' ? ' Depots können nicht als Hauptkonto gesetzt werden.' : ''}
+                </span>
+              </span>
+            </label>
           </div>
           <div>
             <label className="mb-2 block text-sm font-medium text-gray-700 dark:text-gray-300">Farbe</label>
