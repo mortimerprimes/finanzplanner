@@ -99,6 +99,36 @@ function updateAccountBalance(accounts: Account[], accountId: string | undefined
   );
 }
 
+function applyTransferAccountImpact(
+  accounts: Account[],
+  transfer: Pick<Transfer, 'fromAccountId' | 'toAccountId' | 'amount'>
+): Account[] {
+  return accounts.map((account) => {
+    if (account.id === transfer.fromAccountId) {
+      return { ...account, balance: roundCurrencyValue(account.balance - transfer.amount) };
+    }
+    if (account.id === transfer.toAccountId) {
+      return { ...account, balance: roundCurrencyValue(account.balance + transfer.amount) };
+    }
+    return account;
+  });
+}
+
+function revertTransferAccountImpact(
+  accounts: Account[],
+  transfer: Pick<Transfer, 'fromAccountId' | 'toAccountId' | 'amount'>
+): Account[] {
+  return accounts.map((account) => {
+    if (account.id === transfer.fromAccountId) {
+      return { ...account, balance: roundCurrencyValue(account.balance + transfer.amount) };
+    }
+    if (account.id === transfer.toAccountId) {
+      return { ...account, balance: roundCurrencyValue(account.balance - transfer.amount) };
+    }
+    return account;
+  });
+}
+
 function shouldTrackIncomeInAccount(income: Pick<Income, 'accountId' | 'isRecurring'>): boolean {
   return Boolean(income.accountId) && !income.isRecurring;
 }
@@ -443,6 +473,7 @@ type Action =
   | { type: 'UPDATE_ACCOUNT'; payload: Account }
   | { type: 'DELETE_ACCOUNT'; payload: string }
   | { type: 'ADD_TRANSFER'; payload: Omit<Transfer, 'id' | 'createdAt'> }
+  | { type: 'UPDATE_TRANSFER'; payload: Transfer }
   | { type: 'DELETE_TRANSFER'; payload: string }
   | { type: 'ADD_BANK_CONNECTION'; payload: Omit<BankConnection, 'id' | 'createdAt'> }
   | { type: 'UPDATE_BANK_CONNECTION'; payload: BankConnection }
@@ -775,11 +806,18 @@ function financeReducer(state: FinanceState, action: Action): FinanceState {
       return {
         ...state,
         transfers: [...state.transfers, transfer],
-        accounts: state.accounts.map(a => {
-          if (a.id === action.payload.fromAccountId) return { ...a, balance: a.balance - action.payload.amount };
-          if (a.id === action.payload.toAccountId) return { ...a, balance: a.balance + action.payload.amount };
-          return a;
-        }),
+        accounts: applyTransferAccountImpact(state.accounts, transfer),
+      };
+    }
+    case 'UPDATE_TRANSFER': {
+      const existingTransfer = state.transfers.find((transfer) => transfer.id === action.payload.id);
+      if (!existingTransfer) return state;
+
+      const revertedAccounts = revertTransferAccountImpact(state.accounts, existingTransfer);
+      return {
+        ...state,
+        transfers: state.transfers.map((transfer) => transfer.id === action.payload.id ? action.payload : transfer),
+        accounts: applyTransferAccountImpact(revertedAccounts, action.payload),
       };
     }
     case 'DELETE_TRANSFER': {
@@ -788,11 +826,7 @@ function financeReducer(state: FinanceState, action: Action): FinanceState {
       return {
         ...state,
         transfers: state.transfers.filter(t => t.id !== action.payload),
-        accounts: state.accounts.map(a => {
-          if (a.id === transferToDelete.fromAccountId) return { ...a, balance: a.balance + transferToDelete.amount };
-          if (a.id === transferToDelete.toAccountId) return { ...a, balance: a.balance - transferToDelete.amount };
-          return a;
-        }),
+        accounts: revertTransferAccountImpact(state.accounts, transferToDelete),
       };
     }
 
