@@ -180,6 +180,9 @@ function getReconciliationMatchScore(recurring: Income, bankIncome: Income): num
   const hasKeywordOverlap = recurringTokens.some((token) => bankText.includes(token));
 
   let score = amountDiff;
+  if (recurring.accountId && bankIncome.accountId && recurring.accountId !== bankIncome.accountId) {
+    score += 5;
+  }
   if (hasKeywordOverlap) score -= 2;
   if (
     recurringText.includes('stipendium')
@@ -222,9 +225,24 @@ export function reconcileIncomesForMonth(incomes: Income[], month: string): Inco
   const matchedImportedIds = new Set<string>();
 
   const recurringEffectiveSum = recurring.reduce((sum, recurringIncome) => {
+    const explicitMatch = imported.find(
+      (importedIncome) =>
+        !usedImportedIds.has(importedIncome.id)
+        && importedIncome.bankImportMatch?.type === 'recurringIncome'
+        && importedIncome.bankImportMatch.targetId === recurringIncome.id
+    );
+
+    if (explicitMatch) {
+      usedImportedIds.add(explicitMatch.id);
+      matchedRecurringIds.add(recurringIncome.id);
+      matchedImportedIds.add(explicitMatch.id);
+      return sum + explicitMatch.amount;
+    }
+
     const tolerance = Math.max(5, recurringIncome.amount * 0.03);
     const candidates = imported
       .filter((importedIncome) => !usedImportedIds.has(importedIncome.id))
+      .filter((importedIncome) => !recurringIncome.accountId || !importedIncome.accountId || recurringIncome.accountId === importedIncome.accountId)
       .filter((importedIncome) => Math.abs(importedIncome.amount - recurringIncome.amount) <= tolerance)
       .sort(
         (a, b) =>
@@ -266,6 +284,9 @@ function getFixedReconciliationMatchScore(fixedExpense: FixedExpense, expense: E
   const hasKeywordOverlap = fixedTokens.some((token) => expenseText.includes(token));
 
   let score = amountDiff;
+  if (fixedExpense.accountId && expense.accountId && fixedExpense.accountId !== expense.accountId) {
+    score += 5;
+  }
   if (hasKeywordOverlap) score -= 2;
   return score;
 }
@@ -313,9 +334,30 @@ export function reconcileFixedExpensesForMonth(
   const entries: FixedExpenseEffectiveEntry[] = [];
 
   const fixedEffectiveSum = activeFixedExpenses.reduce((sum, fixedExpense) => {
+    const explicitMatch = importedExpenses.find(
+      (expense) =>
+        !usedImportedIds.has(expense.id)
+        && expense.bankImportMatch?.type === 'fixedExpense'
+        && expense.bankImportMatch.targetId === fixedExpense.id
+    );
+
+    if (explicitMatch) {
+      usedImportedIds.add(explicitMatch.id);
+      matchedFixedExpenseIds.add(fixedExpense.id);
+      matchedImportedExpenseIds.add(explicitMatch.id);
+      entries.push({
+        fixedExpenseId: fixedExpense.id,
+        linkedDebtId: fixedExpense.linkedDebtId,
+        effectiveAmount: explicitMatch.amount,
+        matchedImportedExpenseId: explicitMatch.id,
+      });
+      return sum + explicitMatch.amount;
+    }
+
     const tolerance = Math.max(5, fixedExpense.amount * 0.03);
     const candidates = importedExpenses
       .filter((expense) => !usedImportedIds.has(expense.id))
+      .filter((expense) => !fixedExpense.accountId || !expense.accountId || fixedExpense.accountId === expense.accountId)
       .filter((expense) => Math.abs(expense.amount - fixedExpense.amount) <= tolerance)
       .sort(
         (a, b) =>

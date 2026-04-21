@@ -99,6 +99,53 @@ function normalizeCategory(category: string, categories: Array<{ id: string; lab
   return partial?.id || 'other';
 }
 
+function normalizeBankConfidence(value: unknown): number | undefined {
+  const numericValue = Number(value);
+  if (!Number.isFinite(numericValue)) return undefined;
+  return Math.max(0, Math.min(1, numericValue));
+}
+
+function resolveBankTransactionSuggestion(
+  transaction: ParsedBankTransaction,
+  aiSuggestion: AIBankTransactionSuggestion | undefined,
+  categories: Array<{ id: string; label: string }>
+): AIBankTransactionSuggestion {
+  const local = classifyBankTransactionLocally(transaction);
+  const aiConfidence = aiSuggestion?.confidence ?? 0;
+
+  if (transaction.amount > 0) {
+    const aiIncomeType = aiSuggestion?.incomeType || 'other';
+    const keepLocalIncomeType = (
+      (aiIncomeType === 'other' && local.incomeType !== 'other')
+      || (local.incomeType !== 'other' && aiConfidence + 0.08 < local.confidence)
+    );
+
+    return {
+      id: transaction.id,
+      category: 'other',
+      incomeType: keepLocalIncomeType ? local.incomeType : aiIncomeType,
+      confidence: Math.max(keepLocalIncomeType ? local.confidence : aiConfidence, local.confidence),
+      description: aiSuggestion?.description,
+      note: aiSuggestion?.note,
+    };
+  }
+
+  const aiCategory = normalizeCategory(aiSuggestion?.category || 'other', categories);
+  const keepLocalCategory = (
+    (aiCategory === 'other' && local.category !== 'other')
+    || (local.category !== 'other' && aiConfidence + 0.08 < local.confidence)
+  );
+
+  return {
+    id: transaction.id,
+    category: keepLocalCategory ? local.category : aiCategory,
+    incomeType: 'other',
+    confidence: Math.max(keepLocalCategory ? local.confidence : aiConfidence, local.confidence),
+    description: aiSuggestion?.description,
+    note: aiSuggestion?.note,
+  };
+}
+
 function normalizeSuggestions(
   payload: unknown,
   categories: Array<{ id: string; label: string }>,
@@ -530,21 +577,30 @@ Antwortformat:
 }
 
 Transaktionen:
-${chunk.map((transaction) => JSON.stringify({
-  id: transaction.id,
-  direction: transaction.amount >= 0 ? 'income' : 'expense',
-  amount: Math.abs(transaction.amount),
-  date: transaction.date,
-  description: transaction.description,
-  counterparty: transaction.counterparty,
-  purpose: transaction.purpose,
-})).join('\n')}
+${chunk.map((transaction) => {
+  const local = classifyBankTransactionLocally(transaction);
+  return JSON.stringify({
+    id: transaction.id,
+    direction: transaction.amount >= 0 ? 'income' : 'expense',
+    amount: Math.abs(transaction.amount),
+    date: transaction.date,
+    description: transaction.description,
+    counterparty: transaction.counterparty,
+    purpose: transaction.purpose,
+    localHint: transaction.amount >= 0
+      ? { incomeType: local.incomeType, confidence: local.confidence }
+      : { category: local.category, confidence: local.confidence },
+  });
+}).join('\n')}
 
 Regeln:
 - Nur valides JSON.
 - Fuer Einnahmen incomeType setzen und category auf "other" lassen.
 - Fuer Ausgaben eine passende category setzen und incomeType auf "other" lassen.
-- Beschreibung nur verbessern, wenn der Vorschlag wirklich klarer ist.
+- Wenn localHint nicht "other" ist und der Buchungstext nicht klar widerspricht, bevorzuge localHint.
+- Nutze Gegenpartei und Verwendungszweck zusammen, nicht nur die Kurzbeschreibung.
+- Typische Zuordnungen: Supermarkt -> food, Restaurant/Lieferdienst -> dining, Tanken/Oeffis/Parken -> transport, Miete/Strom/Gas/Wasser -> household, Versicherungen/Gebuehren/Steuern -> fees, Streaming/Software -> subscriptions, Apotheke/Arzt -> health.
+- Beschreibung nur verbessern, wenn der Haendlername erhalten bleibt und die neue Form kuerzer oder klarer ist.
 `.trim();
 
     const raw = await callAIProvider(
@@ -564,7 +620,7 @@ Regeln:
       incomeType: (['salary', 'sidejob', 'freelance', 'rental', 'investment', 'other'].includes(String(entry.incomeType))
         ? String(entry.incomeType)
         : 'other') as IncomeType,
-      confidence: Number.isFinite(Number(entry.confidence)) ? Number(entry.confidence) : undefined,
+      confidence: normalizeBankConfidence(entry.confidence),
       description: typeof entry.description === 'string' ? entry.description.trim() : undefined,
       note: typeof entry.note === 'string' ? entry.note.trim() : undefined,
     })).filter((entry) => entry.id);
@@ -574,16 +630,6 @@ Regeln:
 
   return transactions.map((transaction) => {
     const aiMatch = results.find((entry) => entry.id === transaction.id);
-    if (aiMatch) {
-      return aiMatch;
-    }
-
-    const local = classifyBankTransactionLocally(transaction);
-    return {
-      id: transaction.id,
-      category: local.category,
-      incomeType: local.incomeType,
-      confidence: local.confidence,
-    };
+    return resolveBankTransactionSuggestion(transaction, aiMatch, categories);
   });
 }

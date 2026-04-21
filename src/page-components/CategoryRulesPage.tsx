@@ -1,268 +1,485 @@
 'use client';
 
-import { useState } from 'react';
+import { useMemo, useState } from 'react';
+import { Check, Edit3, Landmark, Plus, Search, ToggleLeft, ToggleRight, Trash2, WalletCards, X, Zap } from 'lucide-react';
 import { useFinance } from '@/lib/finance-context';
 import { EXPENSE_CATEGORIES } from '@/src/utils/constants';
-import {
-  Zap, Plus, Trash2, Edit, Check, X, ToggleLeft, ToggleRight, Search,
-} from 'lucide-react';
-import type { CategoryRule, ExpenseCategory } from '@/src/types';
+import type { AccountRule, CategoryRule, ExpenseCategory } from '@/src/types';
+import { Badge, Button, Card, Input, Select } from '../components/ui';
+
+type RuleKind = 'category' | 'account';
+
+const MATCH_TYPE_LABELS: Record<'contains' | 'startsWith' | 'exact', string> = {
+  contains: 'Enthaelt',
+  startsWith: 'Beginnt mit',
+  exact: 'Exakt',
+};
 
 export function CategoryRulesPage() {
   const { state, dispatch } = useFinance();
-  const rules = state.categoryRules || [];
-  const [editId, setEditId] = useState<string | null>(null);
+  const categoryRules = state.categoryRules || [];
+  const accountRules = state.accountRules || [];
+  const accounts = state.accounts || [];
+
+  const [showAdd, setShowAdd] = useState(false);
+  const [ruleKind, setRuleKind] = useState<RuleKind>('category');
+  const [editKey, setEditKey] = useState<string | null>(null);
   const [keyword, setKeyword] = useState('');
   const [category, setCategory] = useState<ExpenseCategory>('food');
-  const [matchType, setMatchType] = useState<CategoryRule['matchType']>('contains');
-  const [showAdd, setShowAdd] = useState(false);
+  const [accountId, setAccountId] = useState('');
+  const [accountCategory, setAccountCategory] = useState('');
+  const [matchType, setMatchType] = useState<'contains' | 'startsWith' | 'exact'>('contains');
 
-  const allCategories = [
+  const allCategories = useMemo(() => [
     ...Object.entries(EXPENSE_CATEGORIES).map(([id, info]) => ({ id, label: info.labelDe })),
-    ...(state.settings.customExpenseCategories || []).map(c => ({ id: c.id, label: c.labelDe || c.label })),
-  ];
+    ...(state.settings.customExpenseCategories || []).map((item) => ({ id: item.id, label: item.labelDe || item.label })),
+  ], [state.settings.customExpenseCategories]);
 
-  const getCategoryLabel = (catId: string) => {
-    const found = allCategories.find(c => c.id === catId);
-    return found?.label || catId;
+  const categoryOptions = useMemo(
+    () => allCategories.map((item) => ({ value: item.id, label: item.label })),
+    [allCategories]
+  );
+  const optionalCategoryOptions = useMemo(
+    () => [{ value: '', label: 'Keine Kategorie mitgeben' }, ...categoryOptions],
+    [categoryOptions]
+  );
+  const accountOptions = useMemo(
+    () => accounts.map((item) => ({ value: item.id, label: item.name })),
+    [accounts]
+  );
+  const matchTypeOptions = useMemo(
+    () => Object.entries(MATCH_TYPE_LABELS).map(([value, label]) => ({ value, label })),
+    []
+  );
+
+  const sortedCategoryRules = useMemo(
+    () => [...categoryRules].sort((left, right) => left.keyword.localeCompare(right.keyword, 'de', { sensitivity: 'base' })),
+    [categoryRules]
+  );
+  const sortedAccountRules = useMemo(
+    () => [...accountRules].sort((left, right) => left.keyword.localeCompare(right.keyword, 'de', { sensitivity: 'base' })),
+    [accountRules]
+  );
+
+  const metrics = useMemo(() => ({
+    total: categoryRules.length + accountRules.length,
+    active: categoryRules.filter((rule) => rule.isActive).length + accountRules.filter((rule) => rule.isActive ?? true).length,
+    categoryRules: categoryRules.length,
+    accountRules: accountRules.length,
+  }), [accountRules, categoryRules]);
+
+  const getCategoryLabel = (categoryId?: string) => {
+    if (!categoryId) return 'Keine Kategorie';
+    return allCategories.find((item) => item.id === categoryId)?.label || categoryId;
   };
 
-  const handleAdd = () => {
-    if (!keyword.trim()) return;
-    dispatch({
-      type: 'ADD_CATEGORY_RULE',
-      payload: { keyword: keyword.trim(), category, matchType, isActive: true },
-    });
-    dispatch({
-      type: 'ADD_ACTIVITY_LOG',
-      payload: { action: 'create', entity: 'other', label: `Kategorie-Regel: "${keyword.trim()}" → ${getCategoryLabel(category)}` },
-    });
+  const getAccountLabel = (targetAccountId: string) => {
+    return accounts.find((item) => item.id === targetAccountId)?.name || 'Unbekanntes Konto';
+  };
+
+  const resetForm = () => {
     setKeyword('');
     setCategory('food');
+    setAccountId('');
+    setAccountCategory('');
     setMatchType('contains');
+    setRuleKind('category');
     setShowAdd(false);
   };
 
-  const handleUpdate = (rule: CategoryRule) => {
-    dispatch({ type: 'UPDATE_CATEGORY_RULE', payload: rule });
-    setEditId(null);
+  const handleAdd = () => {
+    const normalizedKeyword = keyword.trim();
+    if (!normalizedKeyword) return;
+
+    if (ruleKind === 'category') {
+      dispatch({
+        type: 'ADD_CATEGORY_RULE',
+        payload: { keyword: normalizedKeyword, category, matchType, isActive: true },
+      });
+      dispatch({
+        type: 'ADD_ACTIVITY_LOG',
+        payload: {
+          action: 'create',
+          entity: 'other',
+          label: `Kategorie-Regel: "${normalizedKeyword}" -> ${getCategoryLabel(category)}`,
+        },
+      });
+    } else {
+      if (!accountId) return;
+      dispatch({
+        type: 'ADD_ACCOUNT_RULE',
+        payload: {
+          keyword: normalizedKeyword,
+          accountId,
+          category: (accountCategory || undefined) as ExpenseCategory | undefined,
+          matchType,
+          isActive: true,
+        },
+      });
+      dispatch({
+        type: 'ADD_ACTIVITY_LOG',
+        payload: {
+          action: 'create',
+          entity: 'other',
+          label: `Kontoregel: "${normalizedKeyword}" -> ${getAccountLabel(accountId)}`,
+        },
+      });
+    }
+
+    resetForm();
   };
 
-  const handleDelete = (id: string) => {
-    const rule = rules.find(r => r.id === id);
+  const handleDeleteCategoryRule = (id: string) => {
+    const rule = categoryRules.find((item) => item.id === id);
     dispatch({ type: 'DELETE_CATEGORY_RULE', payload: id });
     if (rule) {
       dispatch({
         type: 'ADD_ACTIVITY_LOG',
-        payload: { action: 'delete', entity: 'other', label: `Kategorie-Regel gelöscht: "${rule.keyword}"` },
+        payload: { action: 'delete', entity: 'other', label: `Kategorie-Regel geloescht: "${rule.keyword}"` },
       });
     }
   };
 
-  const handleToggle = (rule: CategoryRule) => {
-    dispatch({ type: 'UPDATE_CATEGORY_RULE', payload: { ...rule, isActive: !rule.isActive } });
-  };
-
-  const matchTypeLabels: Record<CategoryRule['matchType'], string> = {
-    contains: 'Enthält',
-    startsWith: 'Beginnt mit',
-    exact: 'Exakt',
+  const handleDeleteAccountRule = (id: string) => {
+    const rule = accountRules.find((item) => item.id === id);
+    dispatch({ type: 'DELETE_ACCOUNT_RULE', payload: id });
+    if (rule) {
+      dispatch({
+        type: 'ADD_ACTIVITY_LOG',
+        payload: { action: 'delete', entity: 'other', label: `Kontoregel geloescht: "${rule.keyword}"` },
+      });
+    }
   };
 
   return (
-    <div className="space-y-6">
-      <div className="flex items-center justify-between">
+    <div className="space-y-6 animate-fade-in">
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
         <div>
-          <h1 className="text-2xl font-bold text-gray-900 dark:text-white flex items-center gap-2">
-            <Zap size={28} className="text-amber-500" />
-            Kategorie-Regeln
-          </h1>
-          <p className="text-sm text-slate-500 dark:text-gray-400 mt-1">
-            Automatische Kategorisierung bei Bank-Import & neuen Ausgaben
+          <div className="flex items-center gap-2">
+            <Zap size={22} className="text-amber-500" />
+            <h1 className="text-2xl font-bold text-gray-900 dark:text-white">Import-Regelzentrale</h1>
+          </div>
+          <p className="mt-1 text-sm text-slate-500 dark:text-gray-400">
+            Verwalte Kategorie-Regeln und Kontoregeln an einer Stelle. Beide greifen im Bank Sync und beim direkten Kontoauszug-Import.
           </p>
         </div>
-        <button
-          onClick={() => setShowAdd(true)}
-          className="inline-flex items-center gap-2 px-4 py-2.5 rounded-xl bg-blue-600 text-white text-sm font-medium hover:bg-blue-700 transition-colors"
-        >
-          <Plus size={16} /> Neue Regel
-        </button>
+        <Button onClick={() => setShowAdd((current) => !current)}>
+          <Plus size={16} />
+          Neue Regel
+        </Button>
       </div>
 
-      {/* Add Form */}
+      <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
+        {[
+          { label: 'Regeln gesamt', value: metrics.total, color: '#0f172a' },
+          { label: 'Aktiv', value: metrics.active, color: '#0f766e' },
+          { label: 'Kategorie', value: metrics.categoryRules, color: '#2563eb' },
+          { label: 'Konto', value: metrics.accountRules, color: '#7c3aed' },
+        ].map((item) => (
+          <Card key={item.label} className="p-4">
+            <Badge color={item.color}>{item.label}</Badge>
+            <p className="mt-3 text-2xl font-bold text-gray-900 dark:text-white">{item.value}</p>
+          </Card>
+        ))}
+      </div>
+
       {showAdd && (
-        <div className="bg-white dark:bg-gray-900 rounded-2xl border border-blue-200 dark:border-blue-900/40 p-4 space-y-3">
-          <h3 className="text-sm font-semibold text-gray-900 dark:text-white">Neue Regel erstellen</h3>
-          <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+        <Card className="p-5">
+          <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
             <div>
-              <label className="text-xs font-medium text-slate-500 dark:text-gray-400 mb-1 block">Suchbegriff</label>
-              <div className="relative">
-                <Search size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
-                <input
-                  type="text"
-                  value={keyword}
-                  onChange={(e) => setKeyword(e.target.value)}
-                  placeholder='z.B. "REWE", "Amazon"...'
-                  className="block w-full rounded-xl border border-slate-200 dark:border-gray-700 bg-white dark:bg-gray-800 pl-9 pr-4 py-2.5 text-sm text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-500/40"
-                />
-              </div>
+              <h2 className="text-base font-semibold text-gray-900 dark:text-white">Neue Import-Regel</h2>
+              <p className="mt-1 text-sm text-slate-500 dark:text-gray-400">
+                Lege fest, ob ein Buchungstext eine Kategorie bekommt oder direkt einem Konto zugeordnet wird.
+              </p>
             </div>
-            <div>
-              <label className="text-xs font-medium text-slate-500 dark:text-gray-400 mb-1 block">Kategorie</label>
-              <select
+            <div className="flex gap-2">
+              <Button variant={ruleKind === 'category' ? 'primary' : 'secondary'} size="sm" onClick={() => setRuleKind('category')}>
+                <Search size={14} />
+                Kategorie-Regel
+              </Button>
+              <Button variant={ruleKind === 'account' ? 'primary' : 'secondary'} size="sm" onClick={() => setRuleKind('account')}>
+                <WalletCards size={14} />
+                Kontoregel
+              </Button>
+            </div>
+          </div>
+
+          <div className="mt-4 grid grid-cols-1 gap-3 lg:grid-cols-4">
+            <Input
+              label="Suchbegriff"
+              value={keyword}
+              onChange={setKeyword}
+              placeholder="z.B. REWE, Spar, Gehalt GmbH"
+            />
+            <Select
+              label="Trefferart"
+              value={matchType}
+              onChange={(value) => setMatchType(value as typeof matchType)}
+              options={matchTypeOptions}
+            />
+            {ruleKind === 'category' ? (
+              <Select
+                label="Kategorie"
                 value={category}
-                onChange={(e) => setCategory(e.target.value as ExpenseCategory)}
-                className="block w-full rounded-xl border border-slate-200 dark:border-gray-700 bg-white dark:bg-gray-800 px-4 py-2.5 text-sm text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-500/40"
-              >
-                {allCategories.map(c => <option key={c.id} value={c.id}>{c.label}</option>)}
-              </select>
-            </div>
-            <div>
-              <label className="text-xs font-medium text-slate-500 dark:text-gray-400 mb-1 block">Übereinstimmung</label>
-              <select
-                value={matchType}
-                onChange={(e) => setMatchType(e.target.value as CategoryRule['matchType'])}
-                className="block w-full rounded-xl border border-slate-200 dark:border-gray-700 bg-white dark:bg-gray-800 px-4 py-2.5 text-sm text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-500/40"
-              >
-                {Object.entries(matchTypeLabels).map(([k, v]) => <option key={k} value={k}>{v}</option>)}
-              </select>
-            </div>
-          </div>
-          <div className="flex gap-2 justify-end">
-            <button onClick={() => setShowAdd(false)} className="px-4 py-2 rounded-xl text-sm font-medium text-slate-600 dark:text-gray-400 hover:bg-slate-100 dark:hover:bg-gray-800 transition-colors">
-              Abbrechen
-            </button>
-            <button onClick={handleAdd} disabled={!keyword.trim()} className="px-4 py-2 rounded-xl text-sm font-medium bg-blue-600 text-white hover:bg-blue-700 transition-colors disabled:opacity-50">
-              <Check size={16} className="inline mr-1" /> Speichern
-            </button>
-          </div>
-        </div>
-      )}
-
-      {/* Rules List */}
-      {rules.length === 0 ? (
-        <div className="text-center py-16 text-slate-400 dark:text-gray-500">
-          <Zap size={48} className="mx-auto mb-3 opacity-40" />
-          <p className="text-lg font-medium">Noch keine Regeln</p>
-          <p className="text-sm mt-1">Erstelle Regeln wie &quot;REWE&quot; → Lebensmittel</p>
-        </div>
-      ) : (
-        <div className="space-y-2">
-          {rules.map((rule) => {
-            const isEditing = editId === rule.id;
-            return (
-              <div key={rule.id} className={`bg-white dark:bg-gray-900 rounded-xl border p-3 flex items-center gap-3 ${
-                rule.isActive ? 'border-slate-200 dark:border-gray-800' : 'border-slate-200 dark:border-gray-800 opacity-50'
-              }`}>
-                {/* Toggle */}
-                <button onClick={() => handleToggle(rule)} className="flex-shrink-0">
-                  {rule.isActive
-                    ? <ToggleRight size={24} className="text-green-500" />
-                    : <ToggleLeft size={24} className="text-slate-400" />
-                  }
-                </button>
-
-                {isEditing ? (
-                  <EditRuleRow
-                    rule={rule}
-                    allCategories={allCategories}
-                    matchTypeLabels={matchTypeLabels}
-                    onSave={handleUpdate}
-                    onCancel={() => setEditId(null)}
-                  />
-                ) : (
-                  <>
-                    <div className="flex-1 min-w-0">
-                      <div className="flex items-center gap-2 flex-wrap">
-                        <code className="text-sm font-mono font-bold text-gray-900 dark:text-white bg-slate-100 dark:bg-gray-800 px-2 py-0.5 rounded-lg">
-                          &quot;{rule.keyword}&quot;
-                        </code>
-                        <span className="text-xs text-slate-400">→</span>
-                        <span className="text-sm font-medium text-blue-600 dark:text-blue-400">
-                          {getCategoryLabel(rule.category)}
-                        </span>
-                      </div>
-                      <p className="text-[10px] text-slate-400 dark:text-gray-500 mt-0.5">
-                        {matchTypeLabels[rule.matchType]}
-                      </p>
-                    </div>
-                    <div className="flex items-center gap-1 flex-shrink-0">
-                      <button onClick={() => setEditId(rule.id)} className="p-1.5 rounded-lg hover:bg-slate-100 dark:hover:bg-gray-800">
-                        <Edit size={14} className="text-slate-400" />
-                      </button>
-                      <button onClick={() => handleDelete(rule.id)} className="p-1.5 rounded-lg hover:bg-red-50 dark:hover:bg-red-950/30">
-                        <Trash2 size={14} className="text-red-400" />
-                      </button>
-                    </div>
-                  </>
-                )}
+                onChange={(value) => setCategory(value as ExpenseCategory)}
+                options={categoryOptions}
+              />
+            ) : (
+              <Select
+                label="Zielkonto"
+                value={accountId}
+                onChange={setAccountId}
+                options={accountOptions}
+                placeholder="Konto waehlen"
+              />
+            )}
+            {ruleKind === 'account' ? (
+              <Select
+                label="Kategorie optional"
+                value={accountCategory}
+                onChange={setAccountCategory}
+                options={optionalCategoryOptions}
+              />
+            ) : (
+              <div className="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-600 dark:border-gray-800 dark:bg-gray-900/50 dark:text-gray-400">
+                Wirkt sofort auf neue Import-Vorschlaege und auf manuelle Re-Anwendung der Regeln.
               </div>
-            );
-          })}
-        </div>
+            )}
+          </div>
+
+          <div className="mt-4 flex gap-3">
+            <Button variant="secondary" onClick={resetForm} className="flex-1">Abbrechen</Button>
+            <Button onClick={handleAdd} className="flex-1" disabled={!keyword.trim() || (ruleKind === 'account' && !accountId)}>
+              Regel speichern
+            </Button>
+          </div>
+        </Card>
       )}
 
-      {/* Info */}
-      <div className="bg-blue-50 dark:bg-blue-950/20 border border-blue-200 dark:border-blue-900/40 rounded-2xl p-4">
-        <h3 className="text-sm font-bold text-blue-800 dark:text-blue-300 mb-1">Wie funktionieren Regeln?</h3>
-        <ul className="text-xs text-blue-700 dark:text-blue-400 space-y-1">
-          <li>• <strong>Enthält:</strong> &quot;REWE&quot; findet &quot;REWE Markt Berlin&quot;</li>
-          <li>• <strong>Beginnt mit:</strong> &quot;AMAZON&quot; findet &quot;AMAZON MARKETPLACE&quot;</li>
-          <li>• <strong>Exakt:</strong> Nur exakte Übereinstimmung</li>
-          <li>• Regeln werden beim Bank-Import automatisch angewandt</li>
-        </ul>
+      <div className="grid grid-cols-1 gap-4 xl:grid-cols-2">
+        <Card className="p-5">
+          <div className="flex items-center justify-between gap-3">
+            <div>
+              <h2 className="text-base font-semibold text-gray-900 dark:text-white">Kategorie-Regeln</h2>
+              <p className="mt-1 text-sm text-slate-500 dark:text-gray-400">Ordnen Buchungstexte einer Ausgabenkategorie zu.</p>
+            </div>
+            <Badge color="#2563eb">{sortedCategoryRules.length}</Badge>
+          </div>
+
+          <div className="mt-4 space-y-2">
+            {sortedCategoryRules.length === 0 ? (
+              <EmptyHint
+                icon={<Search size={20} className="text-slate-400" />}
+                title="Noch keine Kategorie-Regeln"
+                description="Typische Haendler oder Lastschriften lassen sich hier dauerhaft vorkategorisieren."
+              />
+            ) : sortedCategoryRules.map((rule) => {
+              const isEditing = editKey === `category:${rule.id}`;
+              return (
+                <div key={rule.id} className={`rounded-2xl border p-4 ${rule.isActive ? 'border-slate-200 dark:border-gray-800' : 'border-slate-200/70 opacity-60 dark:border-gray-800'}`}>
+                  {isEditing ? (
+                    <EditCategoryRuleRow
+                      rule={rule}
+                      categoryOptions={categoryOptions}
+                      onCancel={() => setEditKey(null)}
+                      onSave={(nextRule) => {
+                        dispatch({ type: 'UPDATE_CATEGORY_RULE', payload: nextRule });
+                        setEditKey(null);
+                      }}
+                    />
+                  ) : (
+                    <>
+                      <div className="flex items-start justify-between gap-3">
+                        <div className="flex items-start gap-3">
+                          <button onClick={() => dispatch({ type: 'UPDATE_CATEGORY_RULE', payload: { ...rule, isActive: !rule.isActive } })} className="mt-0.5">
+                            {rule.isActive ? <ToggleRight size={24} className="text-emerald-500" /> : <ToggleLeft size={24} className="text-slate-400" />}
+                          </button>
+                          <div>
+                            <div className="flex flex-wrap items-center gap-2">
+                              <Badge color="#2563eb">Kategorie</Badge>
+                              <Badge color={rule.isActive ? '#0f766e' : '#64748b'}>{rule.isActive ? 'Aktiv' : 'Pausiert'}</Badge>
+                              <Badge color="#334155">{MATCH_TYPE_LABELS[rule.matchType]}</Badge>
+                            </div>
+                            <p className="mt-2 text-sm font-semibold text-gray-900 dark:text-white">{`"${rule.keyword}" -> ${getCategoryLabel(rule.category)}`}</p>
+                            <p className="mt-1 text-xs text-slate-500 dark:text-gray-400">Greift auf importierte Ausgaben und bei der erneuten Regelanwendung.</p>
+                          </div>
+                        </div>
+                        <div className="flex gap-2">
+                          <Button variant="secondary" size="sm" onClick={() => setEditKey(`category:${rule.id}`)}><Edit3 size={14} /></Button>
+                          <Button variant="ghost" size="sm" onClick={() => handleDeleteCategoryRule(rule.id)}><Trash2 size={14} /></Button>
+                        </div>
+                      </div>
+                    </>
+                  )}
+                </div>
+              );
+            })}
+          </div>
+        </Card>
+
+        <Card className="p-5">
+          <div className="flex items-center justify-between gap-3">
+            <div>
+              <h2 className="text-base font-semibold text-gray-900 dark:text-white">Kontoregeln</h2>
+              <p className="mt-1 text-sm text-slate-500 dark:text-gray-400">Lenken Importe auf das richtige Konto und optional gleich in die passende Kategorie.</p>
+            </div>
+            <Badge color="#7c3aed">{sortedAccountRules.length}</Badge>
+          </div>
+
+          <div className="mt-4 space-y-2">
+            {sortedAccountRules.length === 0 ? (
+              <EmptyHint
+                icon={<Landmark size={20} className="text-slate-400" />}
+                title="Noch keine Kontoregeln"
+                description="Ideal fuer Kreditkarten, Zweitkonten oder Importe mit wiederkehrenden Gegenparteien."
+              />
+            ) : sortedAccountRules.map((rule) => {
+              const isEditing = editKey === `account:${rule.id}`;
+              return (
+                <div key={rule.id} className={`rounded-2xl border p-4 ${(rule.isActive ?? true) ? 'border-slate-200 dark:border-gray-800' : 'border-slate-200/70 opacity-60 dark:border-gray-800'}`}>
+                  {isEditing ? (
+                    <EditAccountRuleRow
+                      rule={rule}
+                      accountOptions={accountOptions}
+                      categoryOptions={optionalCategoryOptions}
+                      onCancel={() => setEditKey(null)}
+                      onSave={(nextRule) => {
+                        dispatch({ type: 'UPDATE_ACCOUNT_RULE', payload: nextRule });
+                        setEditKey(null);
+                      }}
+                    />
+                  ) : (
+                    <div className="flex items-start justify-between gap-3">
+                      <div className="flex items-start gap-3">
+                        <button onClick={() => dispatch({ type: 'UPDATE_ACCOUNT_RULE', payload: { ...rule, isActive: !(rule.isActive ?? true) } })} className="mt-0.5">
+                          {(rule.isActive ?? true) ? <ToggleRight size={24} className="text-emerald-500" /> : <ToggleLeft size={24} className="text-slate-400" />}
+                        </button>
+                        <div>
+                          <div className="flex flex-wrap items-center gap-2">
+                            <Badge color="#7c3aed">Konto</Badge>
+                            <Badge color={(rule.isActive ?? true) ? '#0f766e' : '#64748b'}>{(rule.isActive ?? true) ? 'Aktiv' : 'Pausiert'}</Badge>
+                            <Badge color="#334155">{MATCH_TYPE_LABELS[rule.matchType || 'contains']}</Badge>
+                          </div>
+                          <p className="mt-2 text-sm font-semibold text-gray-900 dark:text-white">{`"${rule.keyword}" -> ${getAccountLabel(rule.accountId)}`}</p>
+                          <p className="mt-1 text-xs text-slate-500 dark:text-gray-400">
+                            {rule.category ? `Setzt zusaetzlich ${getCategoryLabel(rule.category)}.` : 'Setzt nur das Konto und laesst die Kategorie offen.'}
+                          </p>
+                        </div>
+                      </div>
+                      <div className="flex gap-2">
+                        <Button variant="secondary" size="sm" onClick={() => setEditKey(`account:${rule.id}`)}><Edit3 size={14} /></Button>
+                        <Button variant="ghost" size="sm" onClick={() => handleDeleteAccountRule(rule.id)}><Trash2 size={14} /></Button>
+                      </div>
+                    </div>
+                  )}
+                </div>
+              );
+            })}
+          </div>
+        </Card>
+      </div>
+
+      <Card className="border-blue-200 bg-blue-50/70 p-5 dark:border-blue-900/40 dark:bg-blue-950/20">
+        <h2 className="text-base font-semibold text-blue-900 dark:text-blue-200">Zusammenspiel mit dem Import</h2>
+        <div className="mt-3 space-y-2 text-sm text-blue-900/80 dark:text-blue-200/80">
+          <p>Kategorie-Regeln bestimmen zunaechst die fachliche Einordnung einer importierten Ausgabe.</p>
+          <p>Kontoregeln entscheiden, auf welchem Konto die Buchung landet und koennen dabei direkt eine Kategorie mitgeben.</p>
+          <p>Danach greift die neue Import-Vorschau: Fixkosten, wiederkehrende Einnahmen und Kreditraten koennen schon vor dem Import explizit verbunden werden.</p>
+        </div>
+      </Card>
+    </div>
+  );
+}
+
+function EditCategoryRuleRow({
+  rule,
+  categoryOptions,
+  onSave,
+  onCancel,
+}: {
+  rule: CategoryRule;
+  categoryOptions: Array<{ value: string; label: string }>;
+  onSave: (rule: CategoryRule) => void;
+  onCancel: () => void;
+}) {
+  const [keyword, setKeyword] = useState(rule.keyword);
+  const [category, setCategory] = useState(rule.category);
+  const [matchType, setMatchType] = useState(rule.matchType);
+
+  return (
+    <div className="space-y-3">
+      <div className="grid grid-cols-1 gap-3 md:grid-cols-3">
+        <Input value={keyword} onChange={setKeyword} label="Suchbegriff" placeholder="Suchbegriff" />
+        <Select value={category} onChange={(value) => setCategory(value as ExpenseCategory)} label="Kategorie" options={categoryOptions} />
+        <Select
+          value={matchType}
+          onChange={(value) => setMatchType(value as CategoryRule['matchType'])}
+          label="Trefferart"
+          options={Object.entries(MATCH_TYPE_LABELS).map(([value, label]) => ({ value, label }))}
+        />
+      </div>
+      <div className="flex gap-3">
+        <Button variant="secondary" size="sm" onClick={onCancel} className="flex-1"><X size={14} />Abbrechen</Button>
+        <Button size="sm" onClick={() => onSave({ ...rule, keyword: keyword.trim(), category, matchType })} className="flex-1" disabled={!keyword.trim()}><Check size={14} />Speichern</Button>
       </div>
     </div>
   );
 }
 
-// Inline edit row component
-function EditRuleRow({
+function EditAccountRuleRow({
   rule,
-  allCategories,
-  matchTypeLabels,
+  accountOptions,
+  categoryOptions,
   onSave,
   onCancel,
 }: {
-  rule: CategoryRule;
-  allCategories: { id: string; label: string }[];
-  matchTypeLabels: Record<CategoryRule['matchType'], string>;
-  onSave: (rule: CategoryRule) => void;
+  rule: AccountRule;
+  accountOptions: Array<{ value: string; label: string }>;
+  categoryOptions: Array<{ value: string; label: string }>;
+  onSave: (rule: AccountRule) => void;
   onCancel: () => void;
 }) {
-  const [kw, setKw] = useState(rule.keyword);
-  const [cat, setCat] = useState(rule.category);
-  const [mt, setMt] = useState(rule.matchType);
+  const [keyword, setKeyword] = useState(rule.keyword);
+  const [accountId, setAccountId] = useState(rule.accountId);
+  const [category, setCategory] = useState(rule.category || '');
+  const [matchType, setMatchType] = useState(rule.matchType || 'contains');
 
   return (
-    <div className="flex-1 flex flex-col sm:flex-row gap-2">
-      <input
-        value={kw}
-        onChange={(e) => setKw(e.target.value)}
-        className="flex-1 rounded-lg border border-slate-200 dark:border-gray-700 bg-white dark:bg-gray-800 px-3 py-1.5 text-sm text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-500/40"
-      />
-      <select
-        value={cat}
-        onChange={(e) => setCat(e.target.value as ExpenseCategory)}
-        className="rounded-lg border border-slate-200 dark:border-gray-700 bg-white dark:bg-gray-800 px-3 py-1.5 text-sm text-gray-900 dark:text-white focus:outline-none"
-      >
-        {allCategories.map(c => <option key={c.id} value={c.id}>{c.label}</option>)}
-      </select>
-      <select
-        value={mt}
-        onChange={(e) => setMt(e.target.value as CategoryRule['matchType'])}
-        className="rounded-lg border border-slate-200 dark:border-gray-700 bg-white dark:bg-gray-800 px-3 py-1.5 text-sm text-gray-900 dark:text-white focus:outline-none"
-      >
-        {Object.entries(matchTypeLabels).map(([k, v]) => <option key={k} value={k}>{v}</option>)}
-      </select>
-      <div className="flex gap-1">
-        <button onClick={() => onSave({ ...rule, keyword: kw, category: cat, matchType: mt })} className="p-1.5 rounded-lg bg-green-50 hover:bg-green-100 dark:bg-green-950/30">
-          <Check size={14} className="text-green-600" />
-        </button>
-        <button onClick={onCancel} className="p-1.5 rounded-lg bg-red-50 hover:bg-red-100 dark:bg-red-950/30">
-          <X size={14} className="text-red-600" />
-        </button>
+    <div className="space-y-3">
+      <div className="grid grid-cols-1 gap-3 md:grid-cols-4">
+        <Input value={keyword} onChange={setKeyword} label="Suchbegriff" placeholder="Suchbegriff" />
+        <Select value={accountId} onChange={setAccountId} label="Zielkonto" options={accountOptions} placeholder="Konto waehlen" />
+        <Select value={category} onChange={setCategory} label="Kategorie optional" options={categoryOptions} />
+        <Select
+          value={matchType}
+          onChange={(value) => setMatchType(value as NonNullable<AccountRule['matchType']>)}
+          label="Trefferart"
+          options={Object.entries(MATCH_TYPE_LABELS).map(([value, label]) => ({ value, label }))}
+        />
       </div>
+      <div className="flex gap-3">
+        <Button variant="secondary" size="sm" onClick={onCancel} className="flex-1"><X size={14} />Abbrechen</Button>
+        <Button
+          size="sm"
+          onClick={() => onSave({ ...rule, keyword: keyword.trim(), accountId, category: (category || undefined) as ExpenseCategory | undefined, matchType, isActive: rule.isActive ?? true })}
+          className="flex-1"
+          disabled={!keyword.trim() || !accountId}
+        >
+          <Check size={14} />Speichern
+        </Button>
+      </div>
+    </div>
+  );
+}
+
+function EmptyHint({ icon, title, description }: { icon: React.ReactNode; title: string; description: string }) {
+  return (
+    <div className="rounded-2xl border border-dashed border-slate-200 px-4 py-10 text-center dark:border-gray-800">
+      <div className="mx-auto flex h-10 w-10 items-center justify-center rounded-full bg-slate-100 dark:bg-gray-800">
+        {icon}
+      </div>
+      <p className="mt-3 text-sm font-semibold text-gray-900 dark:text-white">{title}</p>
+      <p className="mt-1 text-sm text-slate-500 dark:text-gray-400">{description}</p>
     </div>
   );
 }

@@ -53,6 +53,15 @@ interface LedgerEditFormState {
   importAccount: string;
 }
 
+type ReclassificationMode = 'normal' | 'fixedExpense' | 'debt' | 'recurringIncome' | 'transfer';
+
+interface ReclassificationFormState {
+  sourceType: 'income' | 'expense';
+  sourceId: string;
+  mode: ReclassificationMode;
+  targetId: string;
+}
+
 interface RawLedgerEntry {
   id: string;
   origin: LedgerOrigin;
@@ -210,6 +219,47 @@ function getDateLabel(date: string): string {
   return formatDate(date, 'EEEE, dd.MM.yyyy');
 }
 
+function isReclassifiableImportedEntry(entry: LedgerEntry | null): boolean {
+  if (!entry) return false;
+  return Boolean(entry.imported && (entry.entityType === 'income' || entry.entityType === 'expense'));
+}
+
+function buildReclassificationFormState(
+  entry: LedgerEntry | null,
+  expenses: Expense[],
+  incomes: Income[]
+): ReclassificationFormState | null {
+  if (!entry || !isReclassifiableImportedEntry(entry)) {
+    return null;
+  }
+
+  if (entry.entityType === 'expense') {
+    const expense = expenses.find((item) => item.id === entry.sourceId);
+    if (!expense) return null;
+
+    return {
+      sourceType: 'expense',
+      sourceId: expense.id,
+      mode: expense.linkedDebtId
+        ? 'debt'
+        : expense.bankImportMatch?.type === 'fixedExpense'
+          ? 'fixedExpense'
+          : 'normal',
+      targetId: expense.linkedDebtId || expense.bankImportMatch?.targetId || '',
+    };
+  }
+
+  const income = incomes.find((item) => item.id === entry.sourceId);
+  if (!income) return null;
+
+  return {
+    sourceType: 'income',
+    sourceId: income.id,
+    mode: income.bankImportMatch?.type === 'recurringIncome' ? 'recurringIncome' : 'normal',
+    targetId: income.bankImportMatch?.targetId || '',
+  };
+}
+
 function groupLedgerEntriesByDate(entries: LedgerEntry[]): LedgerDateGroup[] {
   const groups = new Map<string, LedgerEntry[]>();
 
@@ -250,6 +300,7 @@ export function CashflowCalendar() {
   const [search, setSearch] = useState('');
   const [selectedEntry, setSelectedEntry] = useState<LedgerEntry | null>(null);
   const [editForm, setEditForm] = useState<LedgerEditFormState | null>(null);
+  const [reclassificationForm, setReclassificationForm] = useState<ReclassificationFormState | null>(null);
   const [statementAccountId, setStatementAccountId] = useState('');
   const [statementRange, setStatementRange] = useState<StatementRange>('6m');
 
@@ -276,6 +327,10 @@ export function CashflowCalendar() {
 
     setStatementAccountId(defaultAccountId);
   }, [accounts, statementAccountId]);
+
+  useEffect(() => {
+    setReclassificationForm(buildReclassificationFormState(selectedEntry, expenses, incomes));
+  }, [expenses, incomes, selectedEntry]);
 
   const accountMap = useMemo(() => new Map(accounts.map((account) => [account.id, account])), [accounts]);
   const fixedExpenseMap = useMemo(() => new Map(fixedExpenses.map((fixedExpense) => [fixedExpense.id, fixedExpense])), [fixedExpenses]);
@@ -1003,6 +1058,18 @@ export function CashflowCalendar() {
     () => [{ value: '', label: 'Kein Kredit verknüpft' }, ...debts.map((debt) => ({ value: debt.id, label: debt.name }))],
     [debts]
   );
+  const fixedExpenseMatchOptions = useMemo(
+    () => [{ value: '', label: 'Fixkosten wählen' }, ...fixedExpenses.filter((fixedExpense) => fixedExpense.isActive).map((fixedExpense) => ({ value: fixedExpense.id, label: fixedExpense.name }))],
+    [fixedExpenses]
+  );
+  const recurringIncomeMatchOptions = useMemo(
+    () => [{ value: '', label: 'Wiederkehrende Einnahme wählen' }, ...incomes.filter((income) => income.isRecurring).map((income) => ({ value: income.id, label: income.name }))],
+    [incomes]
+  );
+  const debtMatchOptions = useMemo(
+    () => [{ value: '', label: 'Kredit wählen' }, ...debts.filter((debt) => debt.remainingAmount > 0).map((debt) => ({ value: debt.id, label: debt.name }))],
+    [debts]
+  );
   const flowOptions = [
     { value: 'all', label: 'Alle Bewegungen' },
     { value: 'in', label: 'Nur Eingänge' },
@@ -1313,6 +1380,120 @@ export function CashflowCalendar() {
 
     setSelectedEntry(null);
   };
+
+  const handleResetReclassification = () => {
+    setReclassificationForm(buildReclassificationFormState(selectedEntry, expenses, incomes));
+  };
+
+  const handleApplyReclassification = () => {
+    if (!selectedEntry || !reclassificationForm) return;
+
+    if (reclassificationForm.sourceType === 'expense') {
+      const expense = expenses.find((entry) => entry.id === reclassificationForm.sourceId);
+      if (!expense) return;
+
+      if (reclassificationForm.mode === 'transfer') {
+        if (!expense.accountId || !reclassificationForm.targetId || reclassificationForm.targetId === expense.accountId) {
+          return;
+        }
+
+        dispatch({
+          type: 'ADD_TRANSFER',
+          payload: {
+            fromAccountId: expense.accountId,
+            toAccountId: reclassificationForm.targetId,
+            amount: expense.amount,
+            date: expense.date,
+            note: composeLedgerNote(selectedEntry.displayNote || selectedEntry.note, selectedEntry.importAccount, selectedEntry.importSource),
+          },
+        });
+        dispatch({ type: 'DELETE_EXPENSE', payload: expense.id });
+        setReclassificationForm(null);
+        setSelectedEntry(null);
+        return;
+      }
+
+      dispatch({
+        type: 'UPDATE_EXPENSE',
+        payload: {
+          ...expense,
+          linkedDebtId: reclassificationForm.mode === 'debt' ? reclassificationForm.targetId || undefined : undefined,
+          bankImportMatch: reclassificationForm.mode === 'fixedExpense' && reclassificationForm.targetId
+            ? { type: 'fixedExpense', targetId: reclassificationForm.targetId }
+            : undefined,
+        },
+      });
+      setReclassificationForm(null);
+      setSelectedEntry(null);
+      return;
+    }
+
+    const income = incomes.find((entry) => entry.id === reclassificationForm.sourceId);
+    if (!income) return;
+
+    if (reclassificationForm.mode === 'transfer') {
+      if (!income.accountId || !reclassificationForm.targetId || reclassificationForm.targetId === income.accountId) {
+        return;
+      }
+
+      dispatch({
+        type: 'ADD_TRANSFER',
+        payload: {
+          fromAccountId: reclassificationForm.targetId,
+          toAccountId: income.accountId,
+          amount: income.amount,
+          date: income.date || selectedEntry.date,
+          note: composeLedgerNote(selectedEntry.displayNote || selectedEntry.note, selectedEntry.importAccount, selectedEntry.importSource),
+        },
+      });
+      dispatch({ type: 'DELETE_INCOME', payload: income.id });
+      setReclassificationForm(null);
+      setSelectedEntry(null);
+      return;
+    }
+
+    dispatch({
+      type: 'UPDATE_INCOME',
+      payload: {
+        ...income,
+        bankImportMatch: reclassificationForm.mode === 'recurringIncome' && reclassificationForm.targetId
+          ? { type: 'recurringIncome', targetId: reclassificationForm.targetId }
+          : undefined,
+      },
+    });
+    setReclassificationForm(null);
+    setSelectedEntry(null);
+  };
+
+  const reclassificationModeOptions = reclassificationForm?.sourceType === 'expense'
+    ? [
+        { value: 'normal', label: 'Normale Ausgabe' },
+        { value: 'fixedExpense', label: 'Fixkosten-Treffer' },
+        { value: 'debt', label: 'Kreditrate' },
+        { value: 'transfer', label: 'Umbuchung' },
+      ]
+    : [
+        { value: 'normal', label: 'Normale Einnahme' },
+        { value: 'recurringIncome', label: 'Wiederkehrende Einnahme' },
+        { value: 'transfer', label: 'Umbuchung' },
+      ];
+  const transferCounterpartyOptions = useMemo(() => {
+    const fixedAccountId = selectedEntry?.accountId;
+    return [
+      { value: '', label: 'Gegenkonto wählen' },
+      ...accounts
+        .filter((account) => account.id !== fixedAccountId)
+        .map((account) => ({ value: account.id, label: account.name })),
+    ];
+  }, [accounts, selectedEntry?.accountId]);
+  const canApplyReclassification = Boolean(
+    reclassificationForm
+    && (
+      reclassificationForm.mode === 'normal'
+      || ((reclassificationForm.mode === 'fixedExpense' || reclassificationForm.mode === 'debt' || reclassificationForm.mode === 'recurringIncome') && reclassificationForm.targetId)
+      || (reclassificationForm.mode === 'transfer' && selectedEntry?.accountId && reclassificationForm.targetId && reclassificationForm.targetId !== selectedEntry.accountId)
+    )
+  );
 
   return (
     <div className="space-y-6 animate-fade-in">
@@ -1757,6 +1938,80 @@ export function CashflowCalendar() {
                     <p className="mt-2 text-sm font-semibold text-slate-950 dark:text-white">{selectedEntry.importSource}</p>
                   </div>
                 )}
+              </div>
+            )}
+
+            {isReclassifiableImportedEntry(selectedEntry) && reclassificationForm && (
+              <div className="rounded-2xl border border-slate-200 bg-slate-50/80 p-4 dark:border-gray-800 dark:bg-gray-900/50">
+                <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+                  <div>
+                    <p className="text-xs font-medium uppercase tracking-[0.18em] text-slate-500 dark:text-slate-400">Nachträgliche Umklassifizierung</p>
+                    <p className="mt-1 text-sm text-slate-600 dark:text-slate-300">
+                      Korrigiere importierte Buchungen als Umbuchung, Fixkosten-Treffer, Kreditrate oder wiederkehrende Einnahme.
+                    </p>
+                  </div>
+                  <Badge color="#0f172a">Importierte Buchung</Badge>
+                </div>
+
+                <div className="mt-4 grid gap-3 sm:grid-cols-2">
+                  <Select
+                    label="Umklassifizieren als"
+                    value={reclassificationForm.mode}
+                    onChange={(value) => setReclassificationForm((current) => current ? {
+                      ...current,
+                      mode: value as ReclassificationMode,
+                      targetId: value === current.mode ? current.targetId : '',
+                    } : current)}
+                    options={reclassificationModeOptions}
+                  />
+
+                  {reclassificationForm.mode === 'fixedExpense' && (
+                    <Select
+                      label="Fixkosten-Ziel"
+                      value={reclassificationForm.targetId}
+                      onChange={(value) => setReclassificationForm((current) => current ? { ...current, targetId: value } : current)}
+                      options={fixedExpenseMatchOptions}
+                    />
+                  )}
+
+                  {reclassificationForm.mode === 'debt' && (
+                    <Select
+                      label="Kredit-Ziel"
+                      value={reclassificationForm.targetId}
+                      onChange={(value) => setReclassificationForm((current) => current ? { ...current, targetId: value } : current)}
+                      options={debtMatchOptions}
+                    />
+                  )}
+
+                  {reclassificationForm.mode === 'recurringIncome' && (
+                    <Select
+                      label="Einnahme-Ziel"
+                      value={reclassificationForm.targetId}
+                      onChange={(value) => setReclassificationForm((current) => current ? { ...current, targetId: value } : current)}
+                      options={recurringIncomeMatchOptions}
+                    />
+                  )}
+
+                  {reclassificationForm.mode === 'transfer' && (
+                    <Select
+                      label="Gegenkonto"
+                      value={reclassificationForm.targetId}
+                      onChange={(value) => setReclassificationForm((current) => current ? { ...current, targetId: value } : current)}
+                      options={transferCounterpartyOptions}
+                    />
+                  )}
+                </div>
+
+                {reclassificationForm.mode === 'transfer' && !selectedEntry.accountId && (
+                  <p className="mt-3 text-xs text-amber-700 dark:text-amber-300">
+                    Fuer eine Umbuchung braucht die importierte Buchung zuerst ein zugeordnetes Konto.
+                  </p>
+                )}
+
+                <div className="mt-4 flex gap-3">
+                  <Button variant="secondary" size="sm" onClick={handleResetReclassification} className="flex-1">Zurücksetzen</Button>
+                  <Button size="sm" onClick={handleApplyReclassification} className="flex-1" disabled={!canApplyReclassification}>Umklassifizierung speichern</Button>
+                </div>
               </div>
             )}
 

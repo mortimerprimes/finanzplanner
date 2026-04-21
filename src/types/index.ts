@@ -5,6 +5,13 @@
 // Einnahmen (Income)
 export type IncomeType = 'salary' | 'sidejob' | 'freelance' | 'rental' | 'investment' | 'other';
 
+export type BankImportMatchType = 'fixedExpense' | 'recurringIncome';
+
+export interface BankImportMatch {
+  type: BankImportMatchType;
+  targetId: string;
+}
+
 export interface Income {
   id: string;
   name: string;
@@ -17,6 +24,7 @@ export interface Income {
   accountId?: string;
   affectsAccountBalance?: boolean;
   createdAt: string;
+  bankImportMatch?: BankImportMatch;
   /** Month from which this recurring income is effective (YYYY-MM). Recurring incomes before this month are excluded. */
   startMonth?: string;
   /** For future planning: month from which this income will take effect */
@@ -53,6 +61,7 @@ export interface FixedExpense {
   category: FixedExpenseCategory;
   dueDay: number; // 1-31
   isActive: boolean;
+  autoBookEnabled?: boolean;
   note?: string;
   accountId?: string;
   createdAt: string;
@@ -171,6 +180,7 @@ export interface Expense {
   note?: string;
   attachment?: ExpenseAttachment;
   createdAt: string;
+  bankImportMatch?: BankImportMatch;
   // Split transaction support
   splits?: ExpenseSplit[];
   // Planned (future) expense, not yet booked
@@ -251,6 +261,8 @@ export interface AccountRule {
   keyword: string; // match expense description
   accountId: string;
   category?: ExpenseCategory; // optionally also assign category
+  matchType?: 'contains' | 'startsWith' | 'exact';
+  isActive?: boolean;
 }
 
 // Überweisung zwischen Konten
@@ -420,6 +432,7 @@ export interface AutoBooking {
   bookedExpenseId?: string;
   bookedIncomeId?: string;
   accountId?: string;
+  preserveBookedExpenseOnUndo?: boolean;
   debtPaymentApplied?: boolean;
   linkedDebtId?: string;
   amount: number;

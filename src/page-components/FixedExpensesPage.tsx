@@ -6,6 +6,10 @@ import { FIXED_EXPENSE_CATEGORIES } from '../utils/constants';
 import { FixedExpense, FixedExpenseCategory } from '../types';
 import { Pencil, Trash2, ToggleLeft, ToggleRight, Link2, CheckCircle2, Play, Undo2 } from 'lucide-react';
 
+function isAutoBookEnabled(expense: Pick<FixedExpense, 'autoBookEnabled'>): boolean {
+  return expense.autoBookEnabled ?? true;
+}
+
 export function FixedExpensesPage() {
   const { state, dispatch } = useFinance();
   const { fixedExpenses, debts, settings, expenses, selectedMonth, autoBookings, accounts } = state;
@@ -19,8 +23,10 @@ export function FixedExpensesPage() {
   const [note, setNote] = useState('');
   const [accountId, setAccountId] = useState('');
   const [linkedDebtId, setLinkedDebtId] = useState('');
+  const [autoBookEnabled, setAutoBookEnabled] = useState(true);
 
   const activeExpenses = fixedExpenses.filter(e => e.isActive);
+  const autoBookableExpenses = activeExpenses.filter((expense) => isAutoBookEnabled(expense));
   const fixedReconciliation = reconcileFixedExpensesForMonth(fixedExpenses, expenses, selectedMonth);
   const totalFixed = fixedReconciliation.totalEffective;
 
@@ -28,8 +34,8 @@ export function FixedExpensesPage() {
     return (autoBookings || []).filter(ab => ab.month === selectedMonth && ab.sourceType === 'fixedExpense');
   }, [autoBookings, selectedMonth]);
 
-  const bookedCount = monthBookings.length;
-  const allBooked = activeExpenses.length > 0 && bookedCount >= activeExpenses.length;
+  const bookedCount = monthBookings.filter((booking) => autoBookableExpenses.some((expense) => expense.id === booking.sourceId)).length;
+  const allBooked = autoBookableExpenses.length > 0 && bookedCount >= autoBookableExpenses.length;
 
   const debtOptions = [
     { value: '', label: 'Kein Kredit verknüpft' },
@@ -54,11 +60,13 @@ export function FixedExpensesPage() {
       setCategory(expense.category); setDueDay(expense.dueDay.toString()); setNote(expense.note || '');
       setAccountId(expense.accountId || '');
       setLinkedDebtId(expense.linkedDebtId || '');
+      setAutoBookEnabled(isAutoBookEnabled(expense));
     } else {
       setEditingExpense(null);
       setName(''); setAmount(''); setCategory('housing'); setDueDay('1'); setNote('');
       setAccountId('');
       setLinkedDebtId('');
+      setAutoBookEnabled(true);
     }
     setIsModalOpen(true);
   };
@@ -73,6 +81,7 @@ export function FixedExpensesPage() {
       category,
       dueDay: parseInt(dueDay),
       isActive: editingExpense?.isActive ?? true,
+      autoBookEnabled,
       note: note || undefined,
       accountId: accountId || undefined,
     };
@@ -88,6 +97,10 @@ export function FixedExpensesPage() {
 
   const toggleActive = (e: FixedExpense) => {
     dispatch({ type: 'UPDATE_FIXED_EXPENSE', payload: { ...e, isActive: !e.isActive } });
+  };
+
+  const toggleAutoBook = (expense: FixedExpense) => {
+    dispatch({ type: 'UPDATE_FIXED_EXPENSE', payload: { ...expense, autoBookEnabled: !isAutoBookEnabled(expense) } });
   };
 
   const handleDelete = (id: string) => {
@@ -113,17 +126,17 @@ export function FixedExpensesPage() {
             Monatliche Fixkosten: {formatCurrency(totalFixed, settings)}
           </h2>
           <p className="text-sm text-slate-500 dark:text-gray-500">
-            {activeExpenses.length} aktive Fixkosten · {bookedCount} gebucht für {getMonthDisplayName(selectedMonth)}
+            {activeExpenses.length} aktive Fixkosten · {autoBookableExpenses.length} mit Auto-Buchung · {bookedCount} gebucht für {getMonthDisplayName(selectedMonth)}
             {fixedReconciliation.matchedImportedExpenseIds.size > 0 ? ` · ${fixedReconciliation.matchedImportedExpenseIds.size} Buchungen abgeglichen` : ''}
           </p>
         </div>
         <div className="flex flex-wrap gap-2">
-          {!allBooked && activeExpenses.length > 0 && (
+          {!allBooked && autoBookableExpenses.length > 0 && (
             <Button variant="secondary" onClick={handleAutoBook} icon="Play">
-              Auto-Buchen ({activeExpenses.length - bookedCount} offen)
+              Auto-Buchen ({Math.max(autoBookableExpenses.length - bookedCount, 0)} offen)
             </Button>
           )}
-          {allBooked && activeExpenses.length > 0 && (
+          {allBooked && autoBookableExpenses.length > 0 && (
             <span className="inline-flex items-center gap-1.5 rounded-xl bg-emerald-50 px-3 py-2 text-xs font-medium text-emerald-700 dark:bg-emerald-950/20 dark:text-emerald-400">
               <CheckCircle2 size={14} /> Alle gebucht
             </span>
@@ -131,6 +144,15 @@ export function FixedExpensesPage() {
           <Button onClick={() => openModal()} icon="Plus">Fixkosten hinzufügen</Button>
         </div>
       </div>
+
+      <Card className="border-blue-200 bg-blue-50/70 p-4 dark:border-blue-900/40 dark:bg-blue-950/20">
+        <p className="text-sm font-semibold text-blue-900 dark:text-blue-200">Solide gegen Doppelbuchungen</p>
+        <div className="mt-2 space-y-1 text-sm text-blue-900/80 dark:text-blue-200/80">
+          <p>Auto-Buchung an: Die Fixkostenposition kann per Monatslauf als eigene Buchung erzeugt werden.</p>
+          <p>Nur Abgleich: Die Fixkostenposition bleibt fuer Planung und Import-Matching aktiv, erzeugt aber keine automatische Zusatzbuchung.</p>
+          <p>Importierte Kontoauszugs-Buchungen werden weiterhin mit passenden Fixkosten abgeglichen und nicht doppelt als neue Ausgabe angelegt.</p>
+        </div>
+      </Card>
 
       {/* Category Overview */}
       <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
@@ -184,6 +206,9 @@ export function FixedExpensesPage() {
                               <div className="flex items-center gap-2 flex-wrap">
                                 <h4 className="text-sm font-semibold text-gray-900 dark:text-white truncate">{expense.name}</h4>
                                 <Badge color="#94a3b8">{expense.dueDay}. des Monats</Badge>
+                                <Badge color={isAutoBookEnabled(expense) ? '#2563eb' : '#64748b'}>
+                                  {isAutoBookEnabled(expense) ? 'Auto-Buchung an' : 'Nur Abgleich'}
+                                </Badge>
                                 {linkedDebt && (
                                   <Badge color="#8b5cf6">
                                     <Link2 size={10} className="inline mr-1" />{linkedDebt.name}
@@ -208,6 +233,11 @@ export function FixedExpensesPage() {
                           <div className="flex items-center gap-3 flex-shrink-0">
                             <p className="text-lg font-bold text-amber-600 dark:text-amber-400">-{formatCurrency(expense.amount, settings)}</p>
                             <div className="flex gap-1">
+                              <button onClick={() => toggleAutoBook(expense)} className="p-1.5 rounded-lg hover:bg-blue-50 dark:hover:bg-blue-950/30 transition-colors" title={isAutoBookEnabled(expense) ? 'Auto-Buchung deaktivieren' : 'Auto-Buchung aktivieren'}>
+                                {isAutoBookEnabled(expense)
+                                  ? <ToggleRight size={15} className="text-blue-500" />
+                                  : <ToggleLeft size={15} className="text-slate-400" />}
+                              </button>
                               {isBooked && (
                                 <button onClick={() => handleUndoBooking(expense.id)} className="p-1.5 rounded-lg hover:bg-amber-50 dark:hover:bg-amber-950/30 transition-colors" title="Buchung rückgängig">
                                   <Undo2 size={15} className="text-amber-500" />
@@ -239,6 +269,20 @@ export function FixedExpensesPage() {
           <Select label="Kategorie" value={category} onChange={(v) => setCategory(v as FixedExpenseCategory)} options={categoryOptions} />
           <Select label="Fälligkeitstag" value={dueDay} onChange={setDueDay} options={dayOptions} />
           <Select label="Belastetes Konto" value={accountId} onChange={setAccountId} options={accountOptions} />
+          <label className="flex items-start gap-3 rounded-2xl border border-slate-200 p-4 dark:border-gray-800">
+            <input
+              type="checkbox"
+              checked={autoBookEnabled}
+              onChange={(event) => setAutoBookEnabled(event.target.checked)}
+              className="mt-1 h-4 w-4 rounded border-slate-300 text-blue-600 focus:ring-blue-500"
+            />
+            <span>
+              <span className="block text-sm font-medium text-gray-900 dark:text-white">Auto-Buchung aktivieren</span>
+              <span className="mt-1 block text-xs text-slate-500 dark:text-gray-400">
+                Wenn deaktiviert, bleibt die Fixkostenposition für Planung und Import-Abgleich aktiv, wird aber nicht per Monatslauf automatisch als Buchung erzeugt.
+              </span>
+            </span>
+          </label>
           {debts.length > 0 && (
             <div>
               <Select label="Verknüpfter Kredit" value={linkedDebtId} onChange={setLinkedDebtId} options={debtOptions} />

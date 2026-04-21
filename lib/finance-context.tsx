@@ -215,10 +215,101 @@ function revertExpenseAccountImpact(accounts: Account[], expense: Pick<Expense, 
   return updateAccountBalance(accounts, expense.accountId, expense.amount);
 }
 
+function updateDebtRemainingAmount(debts: Debt[], debtId: string | undefined, delta: number): Debt[] {
+  if (!debtId || delta === 0) return debts;
+
+  return debts.map((debt) => (
+    debt.id === debtId
+      ? {
+          ...debt,
+          remainingAmount: roundCurrencyValue(
+            Math.max(0, Math.min(debt.totalAmount, debt.remainingAmount + delta))
+          ),
+        }
+      : debt
+  ));
+}
+
+function applyExpenseDebtImpact(debts: Debt[], expense: Pick<Expense, 'linkedDebtId' | 'amount'>): Debt[] {
+  return updateDebtRemainingAmount(debts, expense.linkedDebtId, -expense.amount);
+}
+
+function revertExpenseDebtImpact(debts: Debt[], expense: Pick<Expense, 'linkedDebtId' | 'amount'>): Debt[] {
+  return updateDebtRemainingAmount(debts, expense.linkedDebtId, expense.amount);
+}
+
+function syncExpenseDebtImpact(
+  debts: Debt[],
+  previousExpense: Pick<Expense, 'linkedDebtId' | 'amount'> | undefined,
+  nextExpense: Pick<Expense, 'linkedDebtId' | 'amount'> | undefined
+): Debt[] {
+  let updatedDebts = debts;
+
+  if (previousExpense?.linkedDebtId) {
+    updatedDebts = revertExpenseDebtImpact(updatedDebts, previousExpense);
+  }
+
+  if (nextExpense?.linkedDebtId) {
+    updatedDebts = applyExpenseDebtImpact(updatedDebts, nextExpense);
+  }
+
+  return updatedDebts;
+}
+
+function syncAutoBookingsForExpense(
+  autoBookings: AutoBooking[] | undefined,
+  expense: Pick<Expense, 'id' | 'amount' | 'accountId' | 'linkedDebtId'>,
+  options: Partial<Pick<AutoBooking, 'preserveBookedExpenseOnUndo'>> = {}
+): AutoBooking[] {
+  return (autoBookings || []).map((booking) => (
+    booking.bookedExpenseId === expense.id
+      ? {
+          ...booking,
+          amount: expense.amount,
+          accountId: expense.accountId,
+          linkedDebtId: expense.linkedDebtId,
+          debtPaymentApplied: booking.sourceType === 'fixedExpense' ? Boolean(expense.linkedDebtId) : booking.debtPaymentApplied,
+          ...(options.preserveBookedExpenseOnUndo !== undefined
+            ? { preserveBookedExpenseOnUndo: options.preserveBookedExpenseOnUndo }
+            : {}),
+        }
+      : booking
+  ));
+}
+
+function removeAutoBookingsForExpenseIds(
+  autoBookings: AutoBooking[] | undefined,
+  expenseIds: Set<string>
+): AutoBooking[] {
+  return (autoBookings || []).filter(
+    (booking) => !booking.bookedExpenseId || !expenseIds.has(booking.bookedExpenseId)
+  );
+}
+
+function clearAutoBookedExpenseState(
+  expense: Expense,
+  sourceId: string,
+  sourceType: AutoBooking['sourceType']
+): Expense {
+  if (expense.autoBookedFromId !== sourceId || expense.autoBookedType !== sourceType) {
+    return expense;
+  }
+
+  return {
+    ...expense,
+    autoBookedFromId: undefined,
+    autoBookedType: undefined,
+  };
+}
+
 function isFixedExpenseActiveForMonth(fixedExpense: FixedExpense, month: string): boolean {
   const createdMonth = fixedExpense.createdAt?.slice(0, 7);
   if (createdMonth && month < createdMonth) return false;
   return fixedExpense.isActive;
+}
+
+function isFixedExpenseAutoBookEnabled(fixedExpense: Pick<FixedExpense, 'autoBookEnabled'>): boolean {
+  return fixedExpense.autoBookEnabled ?? true;
 }
 
 function getFixedExpenseImportMatchScore(candidate: Expense, importedExpense: Expense, fixedExpense?: FixedExpense): number {
@@ -241,9 +332,14 @@ function findMatchingAutoBookedFixedExpense(
   importedExpense: Expense
 ): Expense | undefined {
   const tolerance = Math.max(5, importedExpense.amount * 0.03);
+  const explicitTargetId = importedExpense.bankImportMatch?.type === 'fixedExpense'
+    ? importedExpense.bankImportMatch.targetId
+    : undefined;
 
   return expenses
     .filter((expense) => expense.autoBookedType === 'fixedExpense' && expense.month === importedExpense.month)
+    .filter((expense) => !explicitTargetId || expense.autoBookedFromId === explicitTargetId)
+    .filter((expense) => !expense.accountId || !importedExpense.accountId || expense.accountId === importedExpense.accountId)
     .filter((expense) => Math.abs(expense.amount - importedExpense.amount) <= tolerance)
     .sort((a, b) => {
       const fixedA = a.autoBookedFromId ? fixedExpenses.find((fixedExpense) => fixedExpense.id === a.autoBookedFromId) : undefined;
@@ -585,7 +681,7 @@ function financeReducer(state: FinanceState, action: Action): FinanceState {
         ...action.payload,
         id: generateId(),
         createdAt: now,
-        startMonth: action.payload.startMonth || (action.payload.isRecurring ? state.selectedMonth : undefined),
+        startMonth: action.payload.startMonth || (action.payload.isRecurring ? getCurrentMonth() : undefined),
       });
       const nextState = {
         ...state,
@@ -620,7 +716,13 @@ function financeReducer(state: FinanceState, action: Action): FinanceState {
       const incomeToDelete = state.incomes.find((income) => income.id === action.payload);
       const nextState = {
         ...state,
-        incomes: state.incomes.filter((income) => income.id !== action.payload),
+        incomes: state.incomes
+          .filter((income) => income.id !== action.payload)
+          .map((income) => (
+            income.bankImportMatch?.type === 'recurringIncome' && income.bankImportMatch.targetId === action.payload
+              ? { ...income, bankImportMatch: undefined }
+              : income
+          )),
         accounts: incomeToDelete ? revertIncomeAccountImpact(state.accounts, incomeToDelete) : state.accounts,
       };
       const syncedRecurringBookings = syncRecurringIncomeAutoBookingsAfterIncomeMutation(nextState, now, incomeToDelete);
@@ -631,15 +733,49 @@ function financeReducer(state: FinanceState, action: Action): FinanceState {
       return { ...state, fixedExpenses: [...state.fixedExpenses, { ...action.payload, id: generateId(), createdAt: now }] };
     case 'UPDATE_FIXED_EXPENSE':
       return { ...state, fixedExpenses: state.fixedExpenses.map(f => f.id === action.payload.id ? action.payload : f) };
-    case 'DELETE_FIXED_EXPENSE':
-      return { ...state, fixedExpenses: state.fixedExpenses.filter(f => f.id !== action.payload) };
+    case 'DELETE_FIXED_EXPENSE': {
+      const fixedExpenseId = action.payload;
+      return {
+        ...state,
+        fixedExpenses: state.fixedExpenses.filter((fixedExpense) => fixedExpense.id !== fixedExpenseId),
+        expenses: state.expenses.map((expense) => {
+          const clearedExpense = clearAutoBookedExpenseState(expense, fixedExpenseId, 'fixedExpense');
+          return clearedExpense.bankImportMatch?.type === 'fixedExpense' && clearedExpense.bankImportMatch.targetId === fixedExpenseId
+            ? { ...clearedExpense, bankImportMatch: undefined }
+            : clearedExpense;
+        }),
+        autoBookings: (state.autoBookings || []).filter(
+          (booking) => !(booking.sourceType === 'fixedExpense' && booking.sourceId === fixedExpenseId)
+        ),
+      };
+    }
 
     case 'ADD_DEBT':
       return { ...state, debts: [...state.debts, { ...action.payload, id: generateId(), createdAt: now }] };
     case 'UPDATE_DEBT':
       return { ...state, debts: state.debts.map(d => d.id === action.payload.id ? action.payload : d) };
-    case 'DELETE_DEBT':
-      return { ...state, debts: state.debts.filter(d => d.id !== action.payload) };
+    case 'DELETE_DEBT': {
+      const debtId = action.payload;
+      return {
+        ...state,
+        debts: state.debts.filter((debt) => debt.id !== debtId),
+        fixedExpenses: state.fixedExpenses.map((fixedExpense) => (
+          fixedExpense.linkedDebtId === debtId
+            ? { ...fixedExpense, linkedDebtId: undefined }
+            : fixedExpense
+        )),
+        expenses: state.expenses.map((expense) => (
+          expense.linkedDebtId === debtId
+            ? { ...expense, linkedDebtId: undefined }
+            : expense
+        )),
+        autoBookings: (state.autoBookings || []).map((booking) => (
+          booking.linkedDebtId === debtId
+            ? { ...booking, linkedDebtId: undefined, debtPaymentApplied: false }
+            : booking
+        )),
+      };
+    }
     case 'MAKE_DEBT_PAYMENT': {
       const debt = state.debts.find((item) => item.id === action.payload.id);
       if (!debt) return state;
@@ -699,22 +835,18 @@ function financeReducer(state: FinanceState, action: Action): FinanceState {
             updatedAccounts = applyExpenseAccountImpact(updatedAccounts, mergedExpense);
           }
 
+          const updatedDebts = syncExpenseDebtImpact(state.debts, matchingAutoBookedExpense, mergedExpense);
+
           return {
             ...state,
             accounts: updatedAccounts,
+            debts: updatedDebts,
             expenses: state.expenses.map((existingExpense) =>
               existingExpense.id === matchingAutoBookedExpense.id ? mergedExpense : existingExpense
             ),
-            autoBookings: (state.autoBookings || []).map((booking) =>
-              booking.bookedExpenseId === matchingAutoBookedExpense.id
-                ? {
-                    ...booking,
-                    bookedExpenseId: undefined,
-                    accountId: mergedExpense.accountId,
-                    amount: mergedExpense.amount,
-                  }
-                : booking
-            ),
+            autoBookings: syncAutoBookingsForExpense(state.autoBookings, mergedExpense, {
+              preserveBookedExpenseOnUndo: true,
+            }),
           };
         }
       }
@@ -723,6 +855,7 @@ function financeReducer(state: FinanceState, action: Action): FinanceState {
         ...state,
         expenses: [...state.expenses, expense],
         accounts: applyExpenseAccountImpact(state.accounts, expense),
+        debts: applyExpenseDebtImpact(state.debts, expense),
       };
     }
     case 'UPDATE_EXPENSE': {
@@ -738,18 +871,25 @@ function financeReducer(state: FinanceState, action: Action): FinanceState {
         updatedAccounts = applyExpenseAccountImpact(updatedAccounts, updatedExpense);
       }
 
+      const updatedDebts = syncExpenseDebtImpact(state.debts, existingExpense, updatedExpense);
+
       return {
         ...state,
         accounts: updatedAccounts,
+        debts: updatedDebts,
+        autoBookings: syncAutoBookingsForExpense(state.autoBookings, updatedExpense),
         expenses: state.expenses.map((expense) => (expense.id === action.payload.id ? updatedExpense : expense)),
       };
     }
     case 'DELETE_EXPENSE': {
       const expenseToDelete = state.expenses.find((expense) => expense.id === action.payload);
+      const expenseIdsToRemove = new Set([action.payload]);
       return {
         ...state,
         expenses: state.expenses.filter((expense) => expense.id !== action.payload),
         accounts: expenseToDelete ? revertExpenseAccountImpact(state.accounts, expenseToDelete) : state.accounts,
+        debts: expenseToDelete ? revertExpenseDebtImpact(state.debts, expenseToDelete) : state.debts,
+        autoBookings: removeAutoBookingsForExpenseIds(state.autoBookings, expenseIdsToRemove),
       };
     }
 
@@ -795,11 +935,43 @@ function financeReducer(state: FinanceState, action: Action): FinanceState {
           action.payload.isDefault ? action.payload.id : undefined
         ),
       };
-    case 'DELETE_ACCOUNT':
+    case 'DELETE_ACCOUNT': {
+      const accountId = action.payload;
       return {
         ...state,
-        accounts: normalizeDefaultAccounts(state.accounts.filter((account) => account.id !== action.payload)),
+        accounts: normalizeDefaultAccounts(state.accounts.filter((account) => account.id !== accountId)),
+        incomes: state.incomes.map((income) => (
+          income.accountId === accountId
+            ? withIncomeAccountTracking({ ...income, accountId: undefined })
+            : income
+        )),
+        fixedExpenses: state.fixedExpenses.map((fixedExpense) => (
+          fixedExpense.accountId === accountId
+            ? { ...fixedExpense, accountId: undefined }
+            : fixedExpense
+        )),
+        expenses: state.expenses.map((expense) => (
+          expense.accountId === accountId
+            ? withExpenseAccountTracking({ ...expense, accountId: undefined })
+            : expense
+        )),
+        transfers: state.transfers.filter((transfer) => transfer.fromAccountId !== accountId && transfer.toAccountId !== accountId),
+        bankConnections: state.bankConnections.map((connection) => (
+          connection.accountId === accountId
+            ? { ...connection, accountId: undefined }
+            : connection
+        )),
+        accountRules: (state.accountRules || []).filter((rule) => rule.accountId !== accountId),
+        autoBookings: (state.autoBookings || []).map((booking) => (
+          booking.accountId === accountId
+            ? { ...booking, accountId: undefined }
+            : booking
+        )),
+        settings: state.settings.lastUsedAccountId === accountId
+          ? { ...state.settings, lastUsedAccountId: undefined }
+          : state.settings,
       };
+    }
 
     case 'ADD_TRANSFER': {
       const transfer = { ...action.payload, id: generateId(), createdAt: now };
@@ -938,9 +1110,16 @@ function financeReducer(state: FinanceState, action: Action): FinanceState {
         (accounts, expense) => revertExpenseAccountImpact(accounts, expense),
         state.accounts
       );
+      const updatedDebts = expensesToDelete.reduce(
+        (debts, expense) => revertExpenseDebtImpact(debts, expense),
+        state.debts
+      );
+      const expenseIdsToRemove = new Set(action.payload);
       return {
         ...state,
         accounts: updatedAccounts,
+        debts: updatedDebts,
+        autoBookings: removeAutoBookingsForExpenseIds(state.autoBookings, expenseIdsToRemove),
         expenses: state.expenses.filter((expense) => !action.payload.includes(expense.id)),
       };
     }
@@ -981,6 +1160,7 @@ function financeReducer(state: FinanceState, action: Action): FinanceState {
       const month = action.payload;
       const existingBookings = state.autoBookings || [];
       const newExpenses: Expense[] = [];
+      let updatedExpenses = state.expenses;
       let updatedDebts = [...state.debts];
       let updatedAccounts = state.accounts;
       let nextBookings = [...existingBookings];
@@ -996,23 +1176,25 @@ function financeReducer(state: FinanceState, action: Action): FinanceState {
           .map((entry) => [entry.fixedExpenseId, entry.matchedImportedExpenseId as string])
       );
 
-      // 1. Auto-book active fixed expenses
-      for (const fe of state.fixedExpenses.filter((fixedExpense) => isFixedExpenseActiveForMonth(fixedExpense, month))) {
+      // 1. Auto-book only fixed expenses that are active and explicitly enabled for booking.
+      for (const fe of state.fixedExpenses.filter((fixedExpense) => (
+        isFixedExpenseActiveForMonth(fixedExpense, month) && isFixedExpenseAutoBookEnabled(fixedExpense)
+      ))) {
         const alreadyBooked = existingBookings.some(ab => ab.sourceId === fe.id && ab.month === month && ab.sourceType === 'fixedExpense');
         if (alreadyBooked) continue;
 
         const matchedImportedExpenseId = matchedImportedExpenseIdsByFixedExpenseId.get(fe.id);
         const matchedImportedExpense = matchedImportedExpenseId ? importedExpensesById.get(matchedImportedExpenseId) : undefined;
-        let bookedExpenseId: string | undefined;
-        const bookingAmount = matchedImportedExpense?.amount ?? fe.amount;
+        let bookedExpense: Expense;
+        let preserveBookedExpenseOnUndo = false;
 
         if (!matchedImportedExpense) {
-          bookedExpenseId = generateId();
+          const bookedExpenseId = generateId();
           // Use actual last day of month for months shorter than dueDay
           const [yr, mo] = month.split('-').map(Number);
           const lastDay = new Date(yr, mo, 0).getDate();
           const day = Math.min(fe.dueDay, lastDay);
-          const expense: Expense = withExpenseAccountTracking<Expense>({
+          bookedExpense = withExpenseAccountTracking<Expense>({
             id: bookedExpenseId,
             description: `${fe.name}${fe.linkedDebtId ? ' (Kreditrate)' : ''}`,
             amount: fe.amount,
@@ -1025,8 +1207,21 @@ function financeReducer(state: FinanceState, action: Action): FinanceState {
             autoBookedFromId: fe.id,
             autoBookedType: 'fixedExpense',
           });
-          newExpenses.push(expense);
-          updatedAccounts = applyExpenseAccountImpact(updatedAccounts, expense);
+          newExpenses.push(bookedExpense);
+          updatedAccounts = applyExpenseAccountImpact(updatedAccounts, bookedExpense);
+          updatedDebts = applyExpenseDebtImpact(updatedDebts, bookedExpense);
+        } else {
+          bookedExpense = withExpenseAccountTracking({
+            ...matchedImportedExpense,
+            linkedDebtId: matchedImportedExpense.linkedDebtId ?? fe.linkedDebtId,
+            autoBookedFromId: fe.id,
+            autoBookedType: 'fixedExpense',
+          });
+          updatedExpenses = updatedExpenses.map((expense) => (
+            expense.id === bookedExpense.id ? bookedExpense : expense
+          ));
+          updatedDebts = syncExpenseDebtImpact(updatedDebts, matchedImportedExpense, bookedExpense);
+          preserveBookedExpenseOnUndo = true;
         }
 
         const booking: AutoBooking = {
@@ -1034,22 +1229,16 @@ function financeReducer(state: FinanceState, action: Action): FinanceState {
           month,
           sourceType: 'fixedExpense',
           sourceId: fe.id,
-          bookedExpenseId,
-          amount: bookingAmount,
-          accountId: matchedImportedExpense?.accountId || fe.accountId,
-          debtPaymentApplied: false,
+          bookedExpenseId: bookedExpense.id,
+          amount: bookedExpense.amount,
+          accountId: bookedExpense.accountId,
+          preserveBookedExpenseOnUndo,
+          debtPaymentApplied: Boolean(bookedExpense.linkedDebtId),
           createdAt: now,
         };
 
-        // If linked to a debt, reduce debt balance
-        if (fe.linkedDebtId) {
-          updatedDebts = updatedDebts.map(d =>
-            d.id === fe.linkedDebtId
-              ? { ...d, remainingAmount: Math.max(0, d.remainingAmount - bookingAmount) }
-              : d
-          );
-          booking.debtPaymentApplied = true;
-          booking.linkedDebtId = fe.linkedDebtId;
+        if (bookedExpense.linkedDebtId) {
+          booking.linkedDebtId = bookedExpense.linkedDebtId;
         }
 
         nextBookings.push(booking);
@@ -1071,7 +1260,7 @@ function financeReducer(state: FinanceState, action: Action): FinanceState {
       return {
         ...state,
         accounts: updatedAccounts,
-        expenses: [...state.expenses, ...newExpenses],
+        expenses: [...updatedExpenses, ...newExpenses],
         debts: updatedDebts,
         autoBookings: nextBookings,
       };
@@ -1082,34 +1271,80 @@ function financeReducer(state: FinanceState, action: Action): FinanceState {
       const booking = (state.autoBookings || []).find(ab => ab.sourceId === sourceId && ab.month === undoMonth);
       if (!booking) return state;
 
-      let updatedDebts2 = state.debts;
-      let updatedAccounts = state.accounts;
-      // Reverse debt payment if applicable
-      if (booking.debtPaymentApplied && booking.linkedDebtId) {
-        updatedDebts2 = state.debts.map(d =>
-          d.id === booking.linkedDebtId
-            ? { ...d, remainingAmount: d.remainingAmount + booking.amount }
-            : d
-        );
+      const nextAutoBookings = (state.autoBookings || []).filter(ab => ab.id !== booking.id);
+
+      if (booking.sourceType === 'recurringIncome') {
+        const updatedAccounts = booking.accountId
+          ? updateAccountBalance(state.accounts, booking.accountId, -booking.amount)
+          : state.accounts;
+
+        return {
+          ...state,
+          accounts: updatedAccounts,
+          autoBookings: nextAutoBookings,
+        };
       }
 
-      if (booking.bookedExpenseId) {
-        const bookedExpense = state.expenses.find((expense) => expense.id === booking.bookedExpenseId);
-        if (bookedExpense) {
-          updatedAccounts = revertExpenseAccountImpact(updatedAccounts, bookedExpense);
-        } else if (booking.accountId) {
-          updatedAccounts = updateAccountBalance(updatedAccounts, booking.accountId, booking.amount);
-        }
-      } else if (booking.sourceType === 'recurringIncome' && booking.accountId) {
-        updatedAccounts = updateAccountBalance(updatedAccounts, booking.accountId, -booking.amount);
+      const bookedExpense = booking.bookedExpenseId
+        ? state.expenses.find((expense) => expense.id === booking.bookedExpenseId)
+        : undefined;
+      const preservedImportedExpense = !bookedExpense
+        ? state.expenses.find((expense) => (
+            expense.month === undoMonth
+            && isImportedExpense(expense)
+            && (
+              expense.autoBookedFromId === sourceId
+              || (expense.bankImportMatch?.type === 'fixedExpense' && expense.bankImportMatch.targetId === sourceId)
+            )
+          ))
+        : undefined;
+
+      if (bookedExpense && booking.preserveBookedExpenseOnUndo) {
+        return {
+          ...state,
+          expenses: state.expenses.map((expense) => (
+            expense.id === bookedExpense.id
+              ? clearAutoBookedExpenseState(expense, sourceId, booking.sourceType)
+              : expense
+          )),
+          autoBookings: nextAutoBookings,
+        };
       }
+
+      if (preservedImportedExpense) {
+        return {
+          ...state,
+          expenses: state.expenses.map((expense) => (
+            expense.id === preservedImportedExpense.id
+              ? clearAutoBookedExpenseState(expense, sourceId, booking.sourceType)
+              : expense
+          )),
+          autoBookings: nextAutoBookings,
+        };
+      }
+
+      if (bookedExpense) {
+        return {
+          ...state,
+          accounts: revertExpenseAccountImpact(state.accounts, bookedExpense),
+          debts: revertExpenseDebtImpact(state.debts, bookedExpense),
+          expenses: state.expenses.filter((expense) => expense.id !== bookedExpense.id),
+          autoBookings: nextAutoBookings,
+        };
+      }
+
+      const updatedAccounts = booking.accountId
+        ? updateAccountBalance(state.accounts, booking.accountId, booking.amount)
+        : state.accounts;
+      const updatedDebts = booking.linkedDebtId
+        ? updateDebtRemainingAmount(state.debts, booking.linkedDebtId, booking.amount)
+        : state.debts;
 
       return {
         ...state,
         accounts: updatedAccounts,
-        expenses: booking.bookedExpenseId ? state.expenses.filter(e => e.id !== booking.bookedExpenseId) : state.expenses,
-        debts: updatedDebts2,
-        autoBookings: (state.autoBookings || []).filter(ab => ab.id !== booking.id),
+        debts: updatedDebts,
+        autoBookings: nextAutoBookings,
       };
     }
 

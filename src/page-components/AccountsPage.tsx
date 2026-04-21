@@ -5,8 +5,13 @@ import { Card, Button, Input, Modal, Select, EmptyState, Icon, Badge } from '../
 import { ACCOUNT_TYPES, INCOME_TYPES, UI_COLORS } from '../utils/constants';
 import { calculateNetWorth, formatCurrency, getExpenseCategoryMap } from '../utils/helpers';
 import { categorizeBankTransactionsWithAI } from '../services/ai';
-import { classifyBankTransactionLocally, parseBankStatementCsv, ParsedBankTransaction } from '../utils/bankImport';
-import { hashTransaction } from '../utils/elbaSync';
+import {
+  collectImportedTransactionFingerprints,
+  composeImportedTransactionNote,
+  suggestExistingBankTransactionMatch,
+  suggestBankTransactionAssignment,
+} from '../utils/bankImport';
+import { parseSyncFile, saveImportedHashes, type SyncParseResult, type SyncTransaction } from '../utils/elbaSync';
 import type { Account, AccountType, ExpenseCategory, IncomeType } from '../types';
 
 interface BankImportDraft {
@@ -21,11 +26,22 @@ interface BankImportDraft {
   incomeType: IncomeType;
   accountId: string;
   confidence?: number;
+  isDuplicate: boolean;
+  fingerprint: string;
+  categorySource: 'local' | 'category-rule' | 'account-rule';
+  accountSource: 'none' | 'default-account' | 'account-rule';
+  categoryRuleKeyword?: string;
+  accountRuleKeyword?: string;
+  existingMatchType: 'none' | 'fixedExpense' | 'recurringIncome' | 'debt';
+  existingMatchTargetId: string;
+  existingMatchTargetLabel?: string;
+  existingMatchDetail?: string;
+  existingMatchConfidence?: number;
 }
 
 export function AccountsPage() {
   const { state, dispatch } = useFinance();
-  const { accounts, debts, transfers, settings, expenses, incomes } = state;
+  const { accounts, debts, transfers, settings, expenses, incomes, accountRules, categoryRules, fixedExpenses } = state;
 
   const [accountModalOpen, setAccountModalOpen] = useState(false);
   const [transferModalOpen, setTransferModalOpen] = useState(false);
@@ -51,7 +67,8 @@ export function AccountsPage() {
   const [importError, setImportError] = useState('');
   const [importLoading, setImportLoading] = useState(false);
   const [importAILoading, setImportAILoading] = useState(false);
-  const [parsedTransactions, setParsedTransactions] = useState<ParsedBankTransaction[]>([]);
+  const [parsedTransactions, setParsedTransactions] = useState<SyncTransaction[]>([]);
+  const [importSyncInfo, setImportSyncInfo] = useState<SyncParseResult | null>(null);
   const [importDrafts, setImportDrafts] = useState<BankImportDraft[]>([]);
 
   const totalAssets = accounts.reduce((sum, account) => sum + account.balance, 0);
@@ -72,32 +89,34 @@ export function AccountsPage() {
   const expenseCategoryOptions = Object.entries(getExpenseCategoryMap(settings)).map(([value, info]) => ({ value, label: info.labelDe }));
   const incomeTypeOptions = Object.entries(INCOME_TYPES).map(([value, info]) => ({ value, label: info.labelDe }));
   const importAccountOptions = [{ value: '', label: 'Ohne Konto importieren' }, ...accountOptions];
+  const fixedExpenseMatchOptions = [{ value: '', label: 'Fixkosten wählen' }, ...fixedExpenses.map((item) => ({ value: item.id, label: item.name }))];
+  const recurringIncomeMatchOptions = [{ value: '', label: 'Einnahme wählen' }, ...incomes.filter((income) => income.isRecurring).map((item) => ({ value: item.id, label: item.name }))];
+  const debtMatchOptions = [{ value: '', label: 'Kredit wählen' }, ...debts.map((item) => ({ value: item.id, label: item.name }))];
 
   const importCounts = useMemo(() => ({
     total: importDrafts.length,
     selected: importDrafts.filter((draft) => draft.selected && draft.direction !== 'ignore').length,
     expenses: importDrafts.filter((draft) => draft.direction === 'expense').length,
     incomes: importDrafts.filter((draft) => draft.direction === 'income').length,
+    duplicates: importDrafts.filter((draft) => draft.isDuplicate).length,
+    rulesApplied: importDrafts.filter((draft) => draft.accountSource === 'account-rule' || draft.categorySource !== 'local').length,
   }), [importDrafts]);
 
   const existingImportFingerprints = useMemo(() => {
-    const importedExpenses = expenses
-      .filter((expense) =>
-        expense.tags?.includes('bankimport')
-        || expense.tags?.includes('banksync')
-        || (expense.note || '').includes('Quelle:')
-      )
-      .map((expense) => hashTransaction(expense.date, -Math.abs(expense.amount), expense.description));
-
-    const importedIncomes = incomes
-      .filter((income) => (income.note || '').includes('Quelle:'))
-      .flatMap((income) => {
-        const date = income.date || income.createdAt.slice(0, 10);
-        return date ? [hashTransaction(date, Math.abs(income.amount), income.name)] : [];
-      });
-
-    return new Set([...importedExpenses, ...importedIncomes]);
+    return collectImportedTransactionFingerprints(expenses, incomes);
   }, [expenses, incomes]);
+
+  const mapTransactionsToDrafts = (transactions: SyncTransaction[], defaultAccountId: string) => {
+    return transactions.map((transaction) => mapImportTransactionToDraft(transaction, {
+      defaultAccountId,
+      existingImportFingerprints,
+      accountRules,
+      categoryRules,
+      fixedExpenses,
+      incomes,
+      debts,
+    }));
+  };
 
   const openAccountModal = (account?: Account) => {
     if (account) {
@@ -195,25 +214,15 @@ export function AccountsPage() {
     setImportError('');
     setImportLoading(false);
     setImportAILoading(false);
+    setImportSyncInfo(null);
     setParsedTransactions([]);
     setImportDrafts([]);
   };
 
-  const mapTransactionToDraft = (transaction: ParsedBankTransaction, accountId: string): BankImportDraft => {
-    const local = classifyBankTransactionLocally(transaction);
-    return {
-      id: transaction.id,
-      selected: true,
-      direction: transaction.amount < 0 ? 'expense' : 'income',
-      date: transaction.date,
-      amount: Math.abs(transaction.amount),
-      description: transaction.description,
-      note: transaction.purpose || '',
-      category: local.category as ExpenseCategory,
-      incomeType: local.incomeType,
-      accountId,
-      confidence: local.confidence,
-    };
+  const reapplyImportAssignments = () => {
+    if (parsedTransactions.length === 0) return;
+    setImportDrafts(mapTransactionsToDrafts(parsedTransactions, importAccountId));
+    setImportError('');
   };
 
   const handleImportFile = async (event: ChangeEvent<HTMLInputElement>) => {
@@ -224,14 +233,15 @@ export function AccountsPage() {
     setImportError('');
     try {
       const text = await file.text();
-      const transactions = parseBankStatementCsv(text);
-      if (transactions.length === 0) {
+      const result = parseSyncFile(text, file.name);
+      if (result.transactions.length === 0) {
         throw new Error('Im CSV wurden keine verwertbaren Buchungen gefunden.');
       }
 
       setImportFileName(file.name);
-      setParsedTransactions(transactions);
-      setImportDrafts(transactions.map((transaction) => mapTransactionToDraft(transaction, importAccountId)));
+      setImportSyncInfo(result);
+      setParsedTransactions(result.transactions);
+      setImportDrafts(mapTransactionsToDrafts(result.transactions, importAccountId));
     } catch (error) {
       setImportError(error instanceof Error ? error.message : 'Der Kontoauszug konnte nicht gelesen werden.');
     } finally {
@@ -258,13 +268,27 @@ export function AccountsPage() {
       setImportDrafts((currentDrafts) => currentDrafts.map((draft) => {
         const suggestion = suggestions.find((item) => item.id === draft.id);
         if (!suggestion) return draft;
+
+        const keepExistingExpenseCategory = draft.direction === 'expense' && (
+          draft.categorySource !== 'local'
+          || ((suggestion.category as ExpenseCategory) === 'other' && draft.category !== 'other' && (suggestion.confidence ?? 0) <= (draft.confidence ?? 0))
+        );
+        const keepExistingIncomeType = draft.direction === 'income'
+          && suggestion.incomeType === 'other'
+          && draft.incomeType !== 'other'
+          && (suggestion.confidence ?? 0) <= (draft.confidence ?? 0);
+
         return {
           ...draft,
-          category: draft.direction === 'expense' ? (suggestion.category as ExpenseCategory) : draft.category,
-          incomeType: draft.direction === 'income' ? suggestion.incomeType : draft.incomeType,
+          category: draft.direction === 'expense'
+            ? (keepExistingExpenseCategory ? draft.category : (suggestion.category as ExpenseCategory))
+            : draft.category,
+          incomeType: draft.direction === 'income'
+            ? (keepExistingIncomeType ? draft.incomeType : suggestion.incomeType)
+            : draft.incomeType,
           description: suggestion.description || draft.description,
           note: suggestion.note || draft.note,
-          confidence: suggestion.confidence ?? draft.confidence,
+          confidence: Math.max(suggestion.confidence ?? 0, draft.confidence ?? 0) || undefined,
         };
       }));
     } catch (error) {
@@ -281,15 +305,13 @@ export function AccountsPage() {
       return;
     }
 
-    const accountLabel = accounts.find((account) => account.id === importAccountId)?.name;
     const seenFingerprints = new Set(existingImportFingerprints);
+    const importedHashes: string[] = [];
     const dedupedDrafts = selectedDrafts.filter((draft) => {
-      const signedAmount = draft.direction === 'expense' ? -Math.abs(draft.amount) : Math.abs(draft.amount);
-      const fingerprint = hashTransaction(draft.date, signedAmount, draft.description);
-      if (seenFingerprints.has(fingerprint)) {
+      if (seenFingerprints.has(draft.fingerprint)) {
         return false;
       }
-      seenFingerprints.add(fingerprint);
+      seenFingerprints.add(draft.fingerprint);
       return true;
     });
 
@@ -299,6 +321,9 @@ export function AccountsPage() {
     }
 
     dedupedDrafts.forEach((draft) => {
+      const resolvedAccountId = draft.accountId || undefined;
+      const importAccountLabel = resolvedAccountId ? accounts.find((account) => account.id === resolvedAccountId)?.name : undefined;
+
       if (draft.direction === 'expense') {
         dispatch({
           type: 'ADD_EXPENSE',
@@ -308,33 +333,38 @@ export function AccountsPage() {
             category: draft.category,
             date: draft.date,
             month: draft.date.slice(0, 7),
-            note: [draft.note, accountLabel ? `Importkonto: ${accountLabel}` : '', importFileName ? `Quelle: ${importFileName}` : '']
-              .filter(Boolean)
-              .join(' · ') || undefined,
-            accountId: draft.accountId || undefined,
+            note: composeImportedTransactionNote(draft.note, importAccountLabel, importFileName),
+            accountId: resolvedAccountId,
+            linkedDebtId: draft.existingMatchType === 'debt' ? draft.existingMatchTargetId || undefined : undefined,
+            bankImportMatch: draft.existingMatchType === 'fixedExpense' && draft.existingMatchTargetId
+              ? { type: 'fixedExpense', targetId: draft.existingMatchTargetId }
+              : undefined,
             tags: ['bankimport'],
           },
         });
-        return;
+      } else {
+        dispatch({
+          type: 'ADD_INCOME',
+          payload: {
+            name: draft.description,
+            amount: draft.amount,
+            type: draft.incomeType,
+            isRecurring: false,
+            date: draft.date,
+            month: draft.date.slice(0, 7),
+            accountId: resolvedAccountId,
+            bankImportMatch: draft.existingMatchType === 'recurringIncome' && draft.existingMatchTargetId
+              ? { type: 'recurringIncome', targetId: draft.existingMatchTargetId }
+              : undefined,
+            note: composeImportedTransactionNote(draft.note, importAccountLabel, importFileName),
+          },
+        });
       }
 
-      dispatch({
-        type: 'ADD_INCOME',
-        payload: {
-          name: draft.description,
-          amount: draft.amount,
-          type: draft.incomeType,
-          isRecurring: false,
-          date: draft.date,
-          month: draft.date.slice(0, 7),
-          accountId: draft.accountId || undefined,
-          note: [draft.note, accountLabel ? `Importkonto: ${accountLabel}` : '', importFileName ? `Quelle: ${importFileName}` : '']
-            .filter(Boolean)
-            .join(' · ') || undefined,
-        },
-      });
+      importedHashes.push(draft.fingerprint);
     });
 
+    saveImportedHashes(importedHashes);
     resetImportFlow();
   };
 
@@ -575,30 +605,30 @@ export function AccountsPage() {
           <div className="rounded-2xl border border-blue-200 bg-blue-50/70 p-4 dark:border-blue-900/50 dark:bg-blue-950/20">
             <div className="flex items-center gap-2">
               <FileSpreadsheet size={16} className="text-blue-500" />
-              <p className="text-sm font-semibold text-gray-900 dark:text-white">CSV von deiner Bank hochladen</p>
+              <p className="text-sm font-semibold text-gray-900 dark:text-white">Kontoauszug von deiner Bank hochladen</p>
             </div>
             <p className="mt-2 text-sm text-slate-600 dark:text-gray-400">
-              Geeignet für typische deutsche Bankexporte wie Raiffeisenbank, Volksbank oder Sparkasse. Die App liest Datum, Betrag und Buchungstext aus und ordnet alles vor dem Import zu.
+              Geeignet für CSV, ELBA CSV und MT940. Die App liest Datum, Betrag und Buchungstext aus, prüft Duplikate gegen bereits importierte Umsätze und ordnet alles vor dem Import zu.
             </p>
           </div>
 
           <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
             <Select label="Konto zuweisen" value={importAccountId} onChange={setImportAccountId} options={importAccountOptions} />
             <div>
-              <label className="mb-2 block text-sm font-medium text-gray-700 dark:text-gray-300">CSV-Datei</label>
+              <label className="mb-2 block text-sm font-medium text-gray-700 dark:text-gray-300">Datei</label>
               <label className="flex min-h-11 cursor-pointer items-center justify-center rounded-xl border border-dashed border-slate-300 bg-white px-4 py-2.5 text-sm font-medium text-slate-700 transition-colors hover:border-slate-400 hover:bg-slate-50 dark:border-gray-700 dark:bg-gray-800 dark:text-gray-200 dark:hover:border-gray-600">
                 <span className="inline-flex items-center gap-2">
                   <Upload size={16} />
-                  {importLoading ? 'Lese CSV...' : 'CSV auswählen'}
+                  {importLoading ? 'Lese Datei...' : 'Datei auswählen'}
                 </span>
-                <input type="file" accept=".csv,text/csv" onChange={handleImportFile} className="sr-only" />
+                <input type="file" accept=".csv,.mt940,.sta,text/plain,text/csv" onChange={handleImportFile} className="sr-only" />
               </label>
             </div>
           </div>
 
           {importFileName && (
             <div className="rounded-xl border border-slate-200 bg-slate-50/80 px-3 py-2 text-sm text-slate-700 dark:border-gray-800 dark:bg-gray-800/40 dark:text-gray-300">
-              Geladen: <span className="font-semibold">{importFileName}</span>
+              Geladen: <span className="font-semibold">{importFileName}</span>{importSyncInfo?.fileType ? ` · Format: ${importSyncInfo.fileType}` : ''}
             </div>
           )}
 
@@ -606,6 +636,9 @@ export function AccountsPage() {
             <Button variant="secondary" onClick={runAICategorization} disabled={importAILoading || parsedTransactions.length === 0}>
               {importAILoading ? <Sparkles size={14} className="animate-pulse" /> : <BrainCircuit size={14} />}
               Mit AI kategorisieren
+            </Button>
+            <Button variant="secondary" onClick={reapplyImportAssignments} disabled={parsedTransactions.length === 0}>
+              Regeln neu anwenden
             </Button>
             <Button
               variant="secondary"
@@ -620,12 +653,14 @@ export function AccountsPage() {
 
           {importDrafts.length > 0 && (
             <>
-              <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
+              <div className="grid grid-cols-2 gap-3 sm:grid-cols-5 lg:grid-cols-6">
                 {[
                   { label: 'Buchungen', value: importCounts.total },
+                  { label: 'Duplikate', value: importCounts.duplicates },
                   { label: 'Ausgaben', value: importCounts.expenses },
                   { label: 'Einnahmen', value: importCounts.incomes },
                   { label: 'Ausgewählt', value: importCounts.selected },
+                  { label: 'Regel-Treffer', value: importCounts.rulesApplied },
                 ].map((item) => (
                   <div key={item.label} className="rounded-2xl border border-slate-200 p-3 text-center dark:border-gray-800">
                     <p className="text-[11px] font-medium text-slate-500 dark:text-gray-500">{item.label}</p>
@@ -636,7 +671,7 @@ export function AccountsPage() {
 
               <div className="max-h-[45dvh] space-y-3 overflow-y-auto pr-1">
                 {importDrafts.map((draft) => (
-                  <div key={draft.id} className="rounded-2xl border border-slate-200 p-4 dark:border-gray-800">
+                  <div key={draft.id} className={`rounded-2xl border p-4 ${draft.isDuplicate ? 'border-amber-300 bg-amber-50/40 dark:border-amber-900/50 dark:bg-amber-950/10' : 'border-slate-200 dark:border-gray-800'}`}>
                     <div className="flex flex-wrap items-center justify-between gap-3">
                       <div className="flex items-center gap-3">
                         <input
@@ -647,7 +682,15 @@ export function AccountsPage() {
                         />
                         <div>
                           <p className="text-sm font-semibold text-gray-900 dark:text-white">{draft.description}</p>
-                          <p className="text-xs text-slate-500 dark:text-gray-500">{draft.date}{draft.confidence ? ` · AI ${Math.round(draft.confidence * 100)}%` : ''}</p>
+                          <p className="text-xs text-slate-500 dark:text-gray-500">{draft.date}{draft.isDuplicate ? ' · vermutlich schon importiert' : ''}{draft.confidence ? ` · AI ${Math.round(draft.confidence * 100)}%` : ''}</p>
+                          <div className="mt-2 flex flex-wrap gap-2">
+                            {draft.isDuplicate && <Badge color="#d97706">Duplikat</Badge>}
+                            {draft.accountSource === 'account-rule' && <Badge color="#0f766e">Kontoregel: {draft.accountRuleKeyword}</Badge>}
+                            {draft.accountSource === 'default-account' && <Badge color="#2563eb">Vorausgewähltes Konto</Badge>}
+                            {draft.categorySource === 'category-rule' && <Badge color="#7c3aed">Kategorie-Regel: {draft.categoryRuleKeyword}</Badge>}
+                            {draft.categorySource === 'account-rule' && <Badge color="#8b5cf6">Kategorie aus Kontoregel</Badge>}
+                            {draft.existingMatchType !== 'none' && <Badge color="#0f172a">Abgleich: {draft.existingMatchTargetLabel || draft.existingMatchType}</Badge>}
+                          </div>
                         </div>
                       </div>
                       <p className={`text-sm font-bold ${draft.direction === 'expense' ? 'text-red-600 dark:text-red-400' : 'text-emerald-600 dark:text-emerald-400'}`}>
@@ -706,9 +749,72 @@ export function AccountsPage() {
                         onChange={(value) => setImportDrafts((current) => current.map((item) => item.id === draft.id ? { ...item, accountId: value } : item))}
                         options={importAccountOptions}
                       />
+                      <Select
+                        label="Abgleich"
+                        value={draft.existingMatchType}
+                        onChange={(value) => setImportDrafts((current) => current.map((item) => item.id === draft.id ? {
+                          ...item,
+                          existingMatchType: value as BankImportDraft['existingMatchType'],
+                          existingMatchTargetId: '',
+                          existingMatchTargetLabel: undefined,
+                          existingMatchDetail: undefined,
+                        } : item))}
+                        options={draft.direction === 'expense'
+                          ? [
+                              { value: 'none', label: 'Kein Abgleich' },
+                              { value: 'fixedExpense', label: 'Als Fixkosten-Treffer' },
+                              { value: 'debt', label: 'Als Kreditrate' },
+                            ]
+                          : [
+                              { value: 'none', label: 'Kein Abgleich' },
+                              { value: 'recurringIncome', label: 'Mit wiederkehrender Einnahme abgleichen' },
+                            ]}
+                      />
+                      {draft.existingMatchType === 'fixedExpense' && (
+                        <Select
+                          label="Fixkosten-Ziel"
+                          value={draft.existingMatchTargetId}
+                          onChange={(value) => setImportDrafts((current) => current.map((item) => item.id === draft.id ? {
+                            ...item,
+                            existingMatchTargetId: value,
+                            existingMatchTargetLabel: fixedExpenses.find((fixedExpense) => fixedExpense.id === value)?.name,
+                          } : item))}
+                          options={fixedExpenseMatchOptions}
+                        />
+                      )}
+                      {draft.existingMatchType === 'debt' && (
+                        <Select
+                          label="Kredit-Ziel"
+                          value={draft.existingMatchTargetId}
+                          onChange={(value) => setImportDrafts((current) => current.map((item) => item.id === draft.id ? {
+                            ...item,
+                            existingMatchTargetId: value,
+                            existingMatchTargetLabel: debts.find((debt) => debt.id === value)?.name,
+                          } : item))}
+                          options={debtMatchOptions}
+                        />
+                      )}
+                      {draft.existingMatchType === 'recurringIncome' && (
+                        <Select
+                          label="Einnahme-Ziel"
+                          value={draft.existingMatchTargetId}
+                          onChange={(value) => setImportDrafts((current) => current.map((item) => item.id === draft.id ? {
+                            ...item,
+                            existingMatchTargetId: value,
+                            existingMatchTargetLabel: incomes.find((income) => income.id === value)?.name,
+                          } : item))}
+                          options={recurringIncomeMatchOptions}
+                        />
+                      )}
                     </div>
 
                     <div className="mt-3">
+                      {draft.existingMatchType !== 'none' && (
+                        <p className="mb-2 text-xs text-slate-500 dark:text-gray-500">
+                          Vorschlag: {draft.existingMatchDetail || draft.existingMatchType}
+                          {draft.existingMatchConfidence ? ` · ${Math.round(draft.existingMatchConfidence * 100)}%` : ''}
+                        </p>
+                      )}
                       <label className="mb-2 block text-sm font-medium text-gray-700 dark:text-gray-300">Notiz</label>
                       <textarea
                         value={draft.note}
@@ -733,4 +839,55 @@ export function AccountsPage() {
       </Modal>
     </div>
   );
+}
+
+function mapImportTransactionToDraft(
+  transaction: SyncTransaction,
+  options: {
+    defaultAccountId: string;
+    existingImportFingerprints: Set<string>;
+    accountRules: ReturnType<typeof useFinance>['state']['accountRules'];
+    categoryRules: ReturnType<typeof useFinance>['state']['categoryRules'];
+    fixedExpenses: ReturnType<typeof useFinance>['state']['fixedExpenses'];
+    incomes: ReturnType<typeof useFinance>['state']['incomes'];
+    debts: ReturnType<typeof useFinance>['state']['debts'];
+  }
+): BankImportDraft {
+  const suggestion = suggestBankTransactionAssignment(transaction, {
+    defaultAccountId: options.defaultAccountId,
+    accountRules: options.accountRules,
+    categoryRules: options.categoryRules,
+  });
+  const existingMatch = suggestExistingBankTransactionMatch(transaction, {
+    accountId: suggestion.accountId || options.defaultAccountId,
+    fixedExpenses: options.fixedExpenses,
+    incomes: options.incomes,
+    debts: options.debts,
+  });
+  const isDuplicate = transaction.isDuplicate || options.existingImportFingerprints.has(transaction.fingerprint);
+
+  return {
+    id: transaction.id,
+    selected: !isDuplicate,
+    direction: transaction.amount < 0 ? 'expense' : 'income',
+    date: transaction.date,
+    amount: Math.abs(transaction.amount),
+    description: transaction.description,
+    note: transaction.purpose || '',
+    category: suggestion.category,
+    incomeType: suggestion.incomeType,
+    accountId: suggestion.accountId,
+    confidence: Math.max(transaction.classificationConfidence, suggestion.confidence),
+    isDuplicate,
+    fingerprint: transaction.fingerprint,
+    categorySource: suggestion.categorySource,
+    accountSource: suggestion.accountSource,
+    categoryRuleKeyword: suggestion.categoryRuleKeyword,
+    accountRuleKeyword: suggestion.accountRuleKeyword,
+    existingMatchType: existingMatch.type,
+    existingMatchTargetId: existingMatch.targetId || '',
+    existingMatchTargetLabel: existingMatch.targetLabel,
+    existingMatchDetail: existingMatch.detail,
+    existingMatchConfidence: existingMatch.confidence,
+  };
 }

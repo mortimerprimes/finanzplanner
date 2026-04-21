@@ -10,6 +10,7 @@
  */
 
 import { parseBankStatementCsv, classifyBankTransactionLocally, type ParsedBankTransaction } from './bankImport';
+import { createTransactionFingerprint } from './transactionFingerprint';
 import type { IncomeType, ExpenseCategory } from '../types';
 
 // ─── Hash Storage ───────────────────────────────────────────────────────────
@@ -39,13 +40,7 @@ export function getStoredHashCount(): number {
  * Same transaction imported twice produces the same hash → automatic deduplication.
  */
 export function hashTransaction(date: string, amount: number, description: string): string {
-  const normalized = `${date}|${amount.toFixed(2)}|${description.slice(0, 50).toLowerCase().replace(/\s+/g, ' ').trim()}`;
-  // Simple but effective djb2-style hash
-  let hash = 5381;
-  for (let i = 0; i < normalized.length; i++) {
-    hash = (hash * 33) ^ normalized.charCodeAt(i);
-  }
-  return (hash >>> 0).toString(36);
+  return createTransactionFingerprint(date, amount, description);
 }
 
 // ─── MT940 Parser ────────────────────────────────────────────────────────────
@@ -231,7 +226,7 @@ export function parseSyncFile(text: string, fileName: string): SyncParseResult {
   }
 
   const transactions: SyncTransaction[] = raw.map((tx) => {
-    const fingerprint = hashTransaction(tx.date, tx.amount, tx.description);
+    const fingerprint = createTransactionFingerprint(tx.date, tx.amount, tx.description, [tx.counterparty, tx.purpose]);
     const classification = classifyBankTransactionLocally(tx);
     return {
       ...tx,
