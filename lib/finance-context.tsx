@@ -140,12 +140,12 @@ function withExpenseAccountTracking<T extends Pick<Expense, 'accountId'>>(expens
   };
 }
 
-function applyIncomeAccountImpact(accounts: Account[], income: Pick<Income, 'accountId' | 'amount' | 'affectsAccountBalance'>): Account[] {
+function applyIncomeAccountImpact(accounts: Account[], income: Pick<Income, 'accountId' | 'amount' | 'affectsAccountBalance' | 'isRecurring'>): Account[] {
   if (!hasIncomeAccountImpact(income)) return accounts;
   return updateAccountBalance(accounts, income.accountId, income.amount);
 }
 
-function revertIncomeAccountImpact(accounts: Account[], income: Pick<Income, 'accountId' | 'amount' | 'affectsAccountBalance'>): Account[] {
+function revertIncomeAccountImpact(accounts: Account[], income: Pick<Income, 'accountId' | 'amount' | 'affectsAccountBalance' | 'isRecurring'>): Account[] {
   if (!hasIncomeAccountImpact(income)) return accounts;
   return updateAccountBalance(accounts, income.accountId, -income.amount);
 }
