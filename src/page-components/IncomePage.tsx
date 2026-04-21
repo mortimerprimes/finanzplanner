@@ -369,7 +369,7 @@ export function IncomePage() {
               </p>
               {accountId && (
                 <p className="mb-2 text-xs text-blue-700 dark:text-blue-300">
-                  Bei der monatlichen Auto-Buchung wird das ausgewählte Konto automatisch gutgeschrieben.
+                  Wenn du den laufenden Monat geöffnet hast, wird das ausgewählte Konto automatisch gutgeschrieben, damit Dashboard und Kontostand sofort stimmen.
                 </p>
               )}
               <MonthPicker label="Wirksam ab (optional, überschreibt Startmonat)" value={effectiveFromMonth} onChange={setEffectiveFromMonth} allowEmpty />

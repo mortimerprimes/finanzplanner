@@ -4,7 +4,7 @@ import { useState } from 'react';
 import { signIn } from 'next-auth/react';
 import { useRouter } from 'next/navigation';
 import Link from 'next/link';
-import { LogIn, Mail, Lock, Code2, ArrowLeft, KeyRound, CheckCircle2 } from 'lucide-react';
+import { LogIn, Mail, Lock, Code2, ArrowLeft, KeyRound, CheckCircle2, User } from 'lucide-react';
 import { DemoStartButton } from '@/components/DemoStartButton';
 
 type View = 'login' | 'reset-request' | 'reset-code' | 'reset-password' | 'reset-done';

@@ -286,12 +286,24 @@ export interface FixedExpenseReconciliationResult {
   entries: FixedExpenseEffectiveEntry[];
 }
 
+function isFixedExpenseActiveForMonth(fixedExpense: FixedExpense, month: string): boolean {
+  const createdMonth = fixedExpense.createdAt?.slice(0, 7);
+  if (createdMonth && month < createdMonth) return false;
+  return fixedExpense.isActive;
+}
+
+function isDebtActiveForMonth(debt: Debt, month: string): boolean {
+  const startMonth = debt.startDate?.slice(0, 7);
+  if (startMonth && month < startMonth) return false;
+  return debt.remainingAmount > 0;
+}
+
 export function reconcileFixedExpensesForMonth(
   fixedExpenses: FixedExpense[],
   expenses: Expense[],
   month: string
 ): FixedExpenseReconciliationResult {
-  const activeFixedExpenses = fixedExpenses.filter((fixedExpense) => fixedExpense.isActive);
+  const activeFixedExpenses = fixedExpenses.filter((fixedExpense) => isFixedExpenseActiveForMonth(fixedExpense, month));
   const monthExpenses = expenses.filter((expense) => expense.month === month);
   const importedExpenses = monthExpenses.filter((expense) => expense.tags?.includes('bankimport') || expense.tags?.includes('banksync'));
 
@@ -420,7 +432,7 @@ export const calculateMonthSummary = (
   totalDebtPayments += calculateTotal(manualDebtExpenses);
 
   totalDebtPayments += debts
-    .filter((debt) => debt.remainingAmount > 0 && !coveredDebtIds.has(debt.id))
+    .filter((debt) => isDebtActiveForMonth(debt, month) && !coveredDebtIds.has(debt.id))
     .reduce((sum, debt) => sum + debt.monthlyPayment, 0);
 
   const variableExpenses = monthExpenses.filter((expense) => !excludedExpenseIds.has(expense.id));

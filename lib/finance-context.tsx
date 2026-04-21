@@ -30,7 +30,7 @@ import type {
   MonthClose,
 } from '@/src/types';
 import { DEFAULT_SETTINGS } from '@/src/utils/constants';
-import { generateId, getCurrentMonth } from '@/src/utils/helpers';
+import { generateId, getCurrentMonth, reconcileFixedExpensesForMonth, reconcileIncomesForMonth } from '@/src/utils/helpers';
 import { buildDemoState } from '@/src/utils/demoData';
 
 const STORAGE_KEY_PREFIX = 'finanzplanner_data';
@@ -103,6 +103,29 @@ function shouldTrackIncomeInAccount(income: Pick<Income, 'accountId' | 'isRecurr
   return Boolean(income.accountId) && !income.isRecurring;
 }
 
+function hasIncomeAccountImpact(income: Pick<Income, 'accountId' | 'isRecurring' | 'affectsAccountBalance'>): boolean {
+  return income.affectsAccountBalance ?? shouldTrackIncomeInAccount(income);
+}
+
+function hasExpenseAccountImpact(expense: Pick<Expense, 'accountId' | 'affectsAccountBalance'>): boolean {
+  return expense.affectsAccountBalance ?? Boolean(expense.accountId);
+}
+
+function getIncomeMonthValue(income: Pick<Income, 'month' | 'date' | 'createdAt'>): string | null {
+  if (income.month) return income.month;
+  if (income.date?.length) return income.date.slice(0, 7);
+  if (income.createdAt?.length) return income.createdAt.slice(0, 7);
+  return null;
+}
+
+function isImportedIncome(income: Pick<Income, 'note' | 'isRecurring'>): boolean {
+  return !income.isRecurring && Boolean((income.note || '').includes('Quelle:'));
+}
+
+function isImportedExpense(expense: Pick<Expense, 'tags'>): boolean {
+  return Boolean(expense.tags?.includes('bankimport') || expense.tags?.includes('banksync'));
+}
+
 function withIncomeAccountTracking<T extends Pick<Income, 'accountId' | 'isRecurring'>>(income: T): T & { affectsAccountBalance: boolean } {
   return {
     ...income,
@@ -118,23 +141,252 @@ function withExpenseAccountTracking<T extends Pick<Expense, 'accountId'>>(expens
 }
 
 function applyIncomeAccountImpact(accounts: Account[], income: Pick<Income, 'accountId' | 'amount' | 'affectsAccountBalance'>): Account[] {
-  if (!income.affectsAccountBalance) return accounts;
+  if (!hasIncomeAccountImpact(income)) return accounts;
   return updateAccountBalance(accounts, income.accountId, income.amount);
 }
 
 function revertIncomeAccountImpact(accounts: Account[], income: Pick<Income, 'accountId' | 'amount' | 'affectsAccountBalance'>): Account[] {
-  if (!income.affectsAccountBalance) return accounts;
+  if (!hasIncomeAccountImpact(income)) return accounts;
   return updateAccountBalance(accounts, income.accountId, -income.amount);
 }
 
 function applyExpenseAccountImpact(accounts: Account[], expense: Pick<Expense, 'accountId' | 'amount' | 'affectsAccountBalance'>): Account[] {
-  if (!expense.affectsAccountBalance) return accounts;
+  if (!hasExpenseAccountImpact(expense)) return accounts;
   return updateAccountBalance(accounts, expense.accountId, -expense.amount);
 }
 
 function revertExpenseAccountImpact(accounts: Account[], expense: Pick<Expense, 'accountId' | 'amount' | 'affectsAccountBalance'>): Account[] {
-  if (!expense.affectsAccountBalance) return accounts;
+  if (!hasExpenseAccountImpact(expense)) return accounts;
   return updateAccountBalance(accounts, expense.accountId, expense.amount);
+}
+
+function isFixedExpenseActiveForMonth(fixedExpense: FixedExpense, month: string): boolean {
+  const createdMonth = fixedExpense.createdAt?.slice(0, 7);
+  if (createdMonth && month < createdMonth) return false;
+  return fixedExpense.isActive;
+}
+
+function getFixedExpenseImportMatchScore(candidate: Expense, importedExpense: Expense, fixedExpense?: FixedExpense): number {
+  const amountDiff = Math.abs(candidate.amount - importedExpense.amount);
+  const importedText = `${importedExpense.description} ${importedExpense.note || ''}`.toLowerCase();
+  const candidateText = `${candidate.description} ${fixedExpense?.name || ''} ${fixedExpense?.note || ''}`.toLowerCase();
+  const candidateTokens = candidateText.split(/\s+/).filter((token) => token.length >= 4);
+  const hasKeywordOverlap = candidateTokens.some((token) => importedText.includes(token));
+
+  let score = amountDiff;
+  if (candidate.category !== importedExpense.category) score += 1;
+  if (candidate.accountId && importedExpense.accountId && candidate.accountId !== importedExpense.accountId) score += 5;
+  if (hasKeywordOverlap) score -= 2;
+  return score;
+}
+
+function findMatchingAutoBookedFixedExpense(
+  expenses: Expense[],
+  fixedExpenses: FixedExpense[],
+  importedExpense: Expense
+): Expense | undefined {
+  const tolerance = Math.max(5, importedExpense.amount * 0.03);
+
+  return expenses
+    .filter((expense) => expense.autoBookedType === 'fixedExpense' && expense.month === importedExpense.month)
+    .filter((expense) => Math.abs(expense.amount - importedExpense.amount) <= tolerance)
+    .sort((a, b) => {
+      const fixedA = a.autoBookedFromId ? fixedExpenses.find((fixedExpense) => fixedExpense.id === a.autoBookedFromId) : undefined;
+      const fixedB = b.autoBookedFromId ? fixedExpenses.find((fixedExpense) => fixedExpense.id === b.autoBookedFromId) : undefined;
+      return getFixedExpenseImportMatchScore(a, importedExpense, fixedA) - getFixedExpenseImportMatchScore(b, importedExpense, fixedB);
+    })[0];
+}
+
+function isRecurringIncomeActiveForMonth(income: Income, month: string): boolean {
+  if (!income.isRecurring) return false;
+
+  const startMonth = income.startMonth || income.createdAt?.slice(0, 7);
+  if (startMonth && month < startMonth) return false;
+  if (income.effectiveFromMonth && month < income.effectiveFromMonth) return false;
+
+  return true;
+}
+
+function syncRecurringIncomeAutoBookingsForMonth(
+  incomes: Income[],
+  autoBookings: AutoBooking[] | undefined,
+  accounts: Account[],
+  month: string,
+  now: string,
+  options: { requireAccountId?: boolean } = {}
+): { autoBookings: AutoBooking[]; updatedAccounts: Account[]; changed: boolean } {
+  const requireAccountId = options.requireAccountId ?? false;
+  const nextBookings: AutoBooking[] = [];
+  const processedSourceIds = new Set<string>();
+  const matchedRecurringIds = reconcileIncomesForMonth(incomes, month).matchedRecurringIds;
+  const eligibleIncomes = new Map(
+    incomes
+      .filter((income) => isRecurringIncomeActiveForMonth(income, month))
+      .filter((income) => !matchedRecurringIds.has(income.id))
+      .filter((income) => !requireAccountId || Boolean(income.accountId))
+      .map((income) => [income.id, income])
+  );
+
+  let updatedAccounts = accounts;
+  let changed = false;
+
+  for (const booking of autoBookings || []) {
+    if (booking.sourceType !== 'recurringIncome' || booking.month !== month) {
+      nextBookings.push(booking);
+      continue;
+    }
+
+    if (processedSourceIds.has(booking.sourceId)) {
+      if (booking.accountId) {
+        updatedAccounts = updateAccountBalance(updatedAccounts, booking.accountId, -booking.amount);
+      }
+      changed = true;
+      continue;
+    }
+
+    processedSourceIds.add(booking.sourceId);
+
+    const income = eligibleIncomes.get(booking.sourceId);
+    if (!income) {
+      if (requireAccountId && !booking.accountId) {
+        nextBookings.push(booking);
+        continue;
+      }
+
+      if (booking.accountId) {
+        updatedAccounts = updateAccountBalance(updatedAccounts, booking.accountId, -booking.amount);
+      }
+      changed = true;
+      continue;
+    }
+
+    eligibleIncomes.delete(booking.sourceId);
+
+    if (booking.accountId === income.accountId && booking.amount === income.amount) {
+      nextBookings.push(booking);
+      continue;
+    }
+
+    if (booking.accountId) {
+      updatedAccounts = updateAccountBalance(updatedAccounts, booking.accountId, -booking.amount);
+    }
+    if (income.accountId) {
+      updatedAccounts = updateAccountBalance(updatedAccounts, income.accountId, income.amount);
+    }
+
+    nextBookings.push({
+      ...booking,
+      bookedIncomeId: income.id,
+      accountId: income.accountId,
+      amount: income.amount,
+    });
+    changed = true;
+  }
+
+  for (const income of eligibleIncomes.values()) {
+    nextBookings.push({
+      id: generateId(),
+      month,
+      sourceType: 'recurringIncome',
+      sourceId: income.id,
+      bookedIncomeId: income.id,
+      amount: income.amount,
+      accountId: income.accountId,
+      createdAt: now,
+    });
+
+    if (income.accountId) {
+      updatedAccounts = updateAccountBalance(updatedAccounts, income.accountId, income.amount);
+    }
+
+    changed = true;
+  }
+
+  return {
+    autoBookings: nextBookings,
+    updatedAccounts,
+    changed,
+  };
+}
+
+function syncRecurringIncomeAutoBookingsAfterIncomeMutation(
+  baseState: Pick<FinanceState, 'selectedMonth' | 'incomes' | 'autoBookings' | 'accounts'>,
+  now: string,
+  income?: Pick<Income, 'month' | 'date' | 'createdAt' | 'note' | 'isRecurring'>
+): Pick<FinanceState, 'autoBookings' | 'accounts'> | null {
+  let workingAutoBookings = baseState.autoBookings;
+  let workingAccounts = baseState.accounts;
+  let changed = false;
+
+  const liveMonth = getCurrentMonth();
+  const incomeMonth = income && isImportedIncome(income) ? getIncomeMonthValue(income) : null;
+  const shouldSyncImportedMonth = incomeMonth && !(incomeMonth === liveMonth && baseState.selectedMonth === liveMonth);
+
+  if (shouldSyncImportedMonth) {
+    const syncedMonth = syncRecurringIncomeAutoBookingsForMonth(
+      baseState.incomes,
+      workingAutoBookings,
+      workingAccounts,
+      incomeMonth,
+      now
+    );
+
+    workingAutoBookings = syncedMonth.autoBookings;
+    workingAccounts = syncedMonth.updatedAccounts;
+    changed = changed || syncedMonth.changed;
+  }
+
+  const syncedCurrentMonth = syncCurrentMonthRecurringIncomeAutoBookings(
+    {
+      ...baseState,
+      autoBookings: workingAutoBookings,
+      accounts: workingAccounts,
+    },
+    now
+  );
+
+  if (syncedCurrentMonth) {
+    workingAutoBookings = syncedCurrentMonth.autoBookings;
+    workingAccounts = syncedCurrentMonth.accounts;
+    changed = true;
+  }
+
+  if (!changed) {
+    return null;
+  }
+
+  return {
+    autoBookings: workingAutoBookings,
+    accounts: workingAccounts,
+  };
+}
+
+function syncCurrentMonthRecurringIncomeAutoBookings(
+  baseState: Pick<FinanceState, 'selectedMonth' | 'incomes' | 'autoBookings' | 'accounts'>,
+  now: string
+): Pick<FinanceState, 'autoBookings' | 'accounts'> | null {
+  const liveMonth = getCurrentMonth();
+  if (baseState.selectedMonth !== liveMonth) {
+    return null;
+  }
+
+  const synced = syncRecurringIncomeAutoBookingsForMonth(
+    baseState.incomes,
+    baseState.autoBookings,
+    baseState.accounts,
+    liveMonth,
+    now,
+    { requireAccountId: true }
+  );
+
+  if (!synced.changed) {
+    return null;
+  }
+
+  return {
+    autoBookings: synced.autoBookings,
+    accounts: synced.updatedAccounts,
+  };
 }
 
 // Action Types (same as before)
@@ -226,8 +478,8 @@ function financeReducer(state: FinanceState, action: Action): FinanceState {
   const now = new Date().toISOString();
 
   switch (action.type) {
-    case 'SET_STATE':
-      return {
+    case 'SET_STATE': {
+      const nextState = {
         ...state,
         ...action.payload,
         accountRules: action.payload.accountRules || state.accountRules || [],
@@ -247,9 +499,15 @@ function financeReducer(state: FinanceState, action: Action): FinanceState {
           notifications: { ...DEFAULT_SETTINGS.notifications, ...action.payload.settings?.notifications },
         },
       };
+      const syncedCurrentMonth = syncCurrentMonthRecurringIncomeAutoBookings(nextState, now);
+      return syncedCurrentMonth ? { ...nextState, ...syncedCurrentMonth } : nextState;
+    }
 
-    case 'SET_SELECTED_MONTH':
-      return { ...state, selectedMonth: action.payload, currentMonth: action.payload };
+    case 'SET_SELECTED_MONTH': {
+      const nextState = { ...state, selectedMonth: action.payload, currentMonth: action.payload };
+      const syncedCurrentMonth = syncCurrentMonthRecurringIncomeAutoBookings(nextState, now);
+      return syncedCurrentMonth ? { ...nextState, ...syncedCurrentMonth } : nextState;
+    }
 
     case 'UPDATE_SETTINGS':
       return {
@@ -271,11 +529,13 @@ function financeReducer(state: FinanceState, action: Action): FinanceState {
         createdAt: now,
         startMonth: action.payload.startMonth || (action.payload.isRecurring ? state.selectedMonth : undefined),
       });
-      return {
+      const nextState = {
         ...state,
         incomes: [...state.incomes, income],
         accounts: applyIncomeAccountImpact(state.accounts, income),
       };
+      const syncedRecurringBookings = syncRecurringIncomeAutoBookingsAfterIncomeMutation(nextState, now, income);
+      return syncedRecurringBookings ? { ...nextState, ...syncedRecurringBookings } : nextState;
     }
     case 'UPDATE_INCOME': {
       const existingIncome = state.incomes.find((income) => income.id === action.payload.id);
@@ -283,24 +543,30 @@ function financeReducer(state: FinanceState, action: Action): FinanceState {
 
       const updatedIncome = withIncomeAccountTracking(action.payload);
       let updatedAccounts = state.accounts;
-      if (existingIncome.affectsAccountBalance) {
+      if (hasIncomeAccountImpact(existingIncome)) {
         updatedAccounts = revertIncomeAccountImpact(updatedAccounts, existingIncome);
+      }
+      if (hasIncomeAccountImpact(updatedIncome)) {
         updatedAccounts = applyIncomeAccountImpact(updatedAccounts, updatedIncome);
       }
 
-      return {
+      const nextState = {
         ...state,
         accounts: updatedAccounts,
         incomes: state.incomes.map((income) => (income.id === action.payload.id ? updatedIncome : income)),
       };
+      const syncedRecurringBookings = syncRecurringIncomeAutoBookingsAfterIncomeMutation(nextState, now, updatedIncome);
+      return syncedRecurringBookings ? { ...nextState, ...syncedRecurringBookings } : nextState;
     }
     case 'DELETE_INCOME': {
       const incomeToDelete = state.incomes.find((income) => income.id === action.payload);
-      return {
+      const nextState = {
         ...state,
         incomes: state.incomes.filter((income) => income.id !== action.payload),
         accounts: incomeToDelete ? revertIncomeAccountImpact(state.accounts, incomeToDelete) : state.accounts,
       };
+      const syncedRecurringBookings = syncRecurringIncomeAutoBookingsAfterIncomeMutation(nextState, now, incomeToDelete);
+      return syncedRecurringBookings ? { ...nextState, ...syncedRecurringBookings } : nextState;
     }
 
     case 'ADD_FIXED_EXPENSE':
@@ -320,11 +586,14 @@ function financeReducer(state: FinanceState, action: Action): FinanceState {
       const debt = state.debts.find((item) => item.id === action.payload.id);
       if (!debt) return state;
 
+      const actualAmount = Math.min(Math.max(0, action.payload.amount), debt.remainingAmount);
+      if (actualAmount <= 0) return state;
+
       const paymentDate = action.payload.date || now.slice(0, 10);
       const paymentExpense = withExpenseAccountTracking({
         id: generateId(),
         description: `${debt.name} Tilgung`,
-        amount: action.payload.amount,
+        amount: actualAmount,
         category: 'other',
         date: paymentDate,
         month: paymentDate.slice(0, 7),
@@ -339,7 +608,7 @@ function financeReducer(state: FinanceState, action: Action): FinanceState {
         ...state,
         debts: state.debts.map((item) =>
           item.id === action.payload.id
-            ? { ...item, remainingAmount: Math.max(0, item.remainingAmount - action.payload.amount) }
+            ? { ...item, remainingAmount: Math.max(0, item.remainingAmount - actualAmount) }
             : item
         ),
         expenses: [...state.expenses, paymentExpense],
@@ -349,6 +618,49 @@ function financeReducer(state: FinanceState, action: Action): FinanceState {
 
     case 'ADD_EXPENSE': {
       const expense = withExpenseAccountTracking({ ...action.payload, id: generateId(), createdAt: now });
+
+      if (isImportedExpense(expense)) {
+        const matchingAutoBookedExpense = findMatchingAutoBookedFixedExpense(state.expenses, state.fixedExpenses, expense);
+
+        if (matchingAutoBookedExpense) {
+          const mergedExpense = withExpenseAccountTracking({
+            ...matchingAutoBookedExpense,
+            ...expense,
+            id: matchingAutoBookedExpense.id,
+            createdAt: matchingAutoBookedExpense.createdAt,
+            autoBookedFromId: matchingAutoBookedExpense.autoBookedFromId,
+            autoBookedType: matchingAutoBookedExpense.autoBookedType,
+            linkedDebtId: matchingAutoBookedExpense.linkedDebtId || expense.linkedDebtId,
+          });
+
+          let updatedAccounts = state.accounts;
+          if (hasExpenseAccountImpact(matchingAutoBookedExpense)) {
+            updatedAccounts = revertExpenseAccountImpact(updatedAccounts, matchingAutoBookedExpense);
+          }
+          if (hasExpenseAccountImpact(mergedExpense)) {
+            updatedAccounts = applyExpenseAccountImpact(updatedAccounts, mergedExpense);
+          }
+
+          return {
+            ...state,
+            accounts: updatedAccounts,
+            expenses: state.expenses.map((existingExpense) =>
+              existingExpense.id === matchingAutoBookedExpense.id ? mergedExpense : existingExpense
+            ),
+            autoBookings: (state.autoBookings || []).map((booking) =>
+              booking.bookedExpenseId === matchingAutoBookedExpense.id
+                ? {
+                    ...booking,
+                    bookedExpenseId: undefined,
+                    accountId: mergedExpense.accountId,
+                    amount: mergedExpense.amount,
+                  }
+                : booking
+            ),
+          };
+        }
+      }
+
       return {
         ...state,
         expenses: [...state.expenses, expense],
@@ -361,8 +673,10 @@ function financeReducer(state: FinanceState, action: Action): FinanceState {
 
       const updatedExpense = withExpenseAccountTracking(action.payload);
       let updatedAccounts = state.accounts;
-      if (existingExpense.affectsAccountBalance) {
+      if (hasExpenseAccountImpact(existingExpense)) {
         updatedAccounts = revertExpenseAccountImpact(updatedAccounts, existingExpense);
+      }
+      if (hasExpenseAccountImpact(updatedExpense)) {
         updatedAccounts = applyExpenseAccountImpact(updatedAccounts, updatedExpense);
       }
 
@@ -587,45 +901,63 @@ function financeReducer(state: FinanceState, action: Action): FinanceState {
     case 'RUN_MONTH_AUTO_BOOKING': {
       const month = action.payload;
       const existingBookings = state.autoBookings || [];
-      const newBookings: AutoBooking[] = [];
       const newExpenses: Expense[] = [];
       let updatedDebts = [...state.debts];
       let updatedAccounts = state.accounts;
+      let nextBookings = [...existingBookings];
+      const fixedReconciliation = reconcileFixedExpensesForMonth(state.fixedExpenses, state.expenses, month);
+      const importedExpensesById = new Map(
+        state.expenses
+          .filter((expense) => expense.month === month && isImportedExpense(expense))
+          .map((expense) => [expense.id, expense])
+      );
+      const matchedImportedExpenseIdsByFixedExpenseId = new Map(
+        fixedReconciliation.entries
+          .filter((entry) => entry.matchedImportedExpenseId)
+          .map((entry) => [entry.fixedExpenseId, entry.matchedImportedExpenseId as string])
+      );
 
       // 1. Auto-book active fixed expenses
-      for (const fe of state.fixedExpenses.filter(f => f.isActive)) {
+      for (const fe of state.fixedExpenses.filter((fixedExpense) => isFixedExpenseActiveForMonth(fixedExpense, month))) {
         const alreadyBooked = existingBookings.some(ab => ab.sourceId === fe.id && ab.month === month && ab.sourceType === 'fixedExpense');
         if (alreadyBooked) continue;
 
-        const expenseId = generateId();
-        // Use actual last day of month for months shorter than dueDay
-        const [yr, mo] = month.split('-').map(Number);
-        const lastDay = new Date(yr, mo, 0).getDate();
-        const day = Math.min(fe.dueDay, lastDay);
-        const expense = withExpenseAccountTracking({
-          id: expenseId,
-          description: `${fe.name}${fe.linkedDebtId ? ' (Kreditrate)' : ''}`,
-          amount: fe.amount,
-          category: fe.category as any,
-          date: `${month}-${String(day).padStart(2, '0')}`,
-          month,
-          createdAt: now,
-          accountId: fe.accountId,
-          linkedDebtId: fe.linkedDebtId,
-          autoBookedFromId: fe.id,
-          autoBookedType: 'fixedExpense',
-        });
-        newExpenses.push(expense);
-        updatedAccounts = applyExpenseAccountImpact(updatedAccounts, expense);
+        const matchedImportedExpenseId = matchedImportedExpenseIdsByFixedExpenseId.get(fe.id);
+        const matchedImportedExpense = matchedImportedExpenseId ? importedExpensesById.get(matchedImportedExpenseId) : undefined;
+        let bookedExpenseId: string | undefined;
+        const bookingAmount = matchedImportedExpense?.amount ?? fe.amount;
+
+        if (!matchedImportedExpense) {
+          bookedExpenseId = generateId();
+          // Use actual last day of month for months shorter than dueDay
+          const [yr, mo] = month.split('-').map(Number);
+          const lastDay = new Date(yr, mo, 0).getDate();
+          const day = Math.min(fe.dueDay, lastDay);
+          const expense = withExpenseAccountTracking({
+            id: bookedExpenseId,
+            description: `${fe.name}${fe.linkedDebtId ? ' (Kreditrate)' : ''}`,
+            amount: fe.amount,
+            category: fe.category as any,
+            date: `${month}-${String(day).padStart(2, '0')}`,
+            month,
+            createdAt: now,
+            accountId: fe.accountId,
+            linkedDebtId: fe.linkedDebtId,
+            autoBookedFromId: fe.id,
+            autoBookedType: 'fixedExpense',
+          });
+          newExpenses.push(expense);
+          updatedAccounts = applyExpenseAccountImpact(updatedAccounts, expense);
+        }
 
         const booking: AutoBooking = {
           id: generateId(),
           month,
           sourceType: 'fixedExpense',
           sourceId: fe.id,
-          bookedExpenseId: expenseId,
-          amount: fe.amount,
-          accountId: fe.accountId,
+          bookedExpenseId,
+          amount: bookingAmount,
+          accountId: matchedImportedExpense?.accountId || fe.accountId,
           debtPaymentApplied: false,
           createdAt: now,
         };
@@ -634,49 +966,35 @@ function financeReducer(state: FinanceState, action: Action): FinanceState {
         if (fe.linkedDebtId) {
           updatedDebts = updatedDebts.map(d =>
             d.id === fe.linkedDebtId
-              ? { ...d, remainingAmount: Math.max(0, d.remainingAmount - fe.amount) }
+              ? { ...d, remainingAmount: Math.max(0, d.remainingAmount - bookingAmount) }
               : d
           );
           booking.debtPaymentApplied = true;
           booking.linkedDebtId = fe.linkedDebtId;
         }
 
-        newBookings.push(booking);
+        nextBookings.push(booking);
       }
 
-      // 2. Auto-book recurring incomes (create income entries for the month)
-      for (const income of state.incomes.filter(i => i.isRecurring)) {
-        const startMonth = income.startMonth || income.createdAt?.slice(0, 7);
-        if (startMonth && month < startMonth) continue;
-        if (income.effectiveFromMonth && month < income.effectiveFromMonth) continue;
+      // 2. Auto-book recurring incomes without duplicating imported salary transactions.
+      const syncedRecurringIncomeBookings = syncRecurringIncomeAutoBookingsForMonth(
+        state.incomes,
+        nextBookings,
+        updatedAccounts,
+        month,
+        now
+      );
+      nextBookings = syncedRecurringIncomeBookings.autoBookings;
+      updatedAccounts = syncedRecurringIncomeBookings.updatedAccounts;
 
-        const alreadyBooked = existingBookings.some(ab => ab.sourceId === income.id && ab.month === month && ab.sourceType === 'recurringIncome');
-        if (alreadyBooked) continue;
-
-        newBookings.push({
-          id: generateId(),
-          month,
-          sourceType: 'recurringIncome',
-          sourceId: income.id,
-          bookedIncomeId: income.id,
-          amount: income.amount,
-          accountId: income.accountId,
-          createdAt: now,
-        });
-
-        if (income.accountId) {
-          updatedAccounts = updateAccountBalance(updatedAccounts, income.accountId, income.amount);
-        }
-      }
-
-      if (newBookings.length === 0 && newExpenses.length === 0) return state;
+      if (nextBookings.length === existingBookings.length && newExpenses.length === 0) return state;
 
       return {
         ...state,
         accounts: updatedAccounts,
         expenses: [...state.expenses, ...newExpenses],
         debts: updatedDebts,
-        autoBookings: [...existingBookings, ...newBookings],
+        autoBookings: nextBookings,
       };
     }
 
@@ -782,8 +1100,8 @@ function financeReducer(state: FinanceState, action: Action): FinanceState {
     case 'DELETE_MONTH_CLOSE':
       return { ...state, monthCloses: (state.monthCloses || []).filter(mc => mc.id !== action.payload) };
 
-    case 'IMPORT_DATA':
-      return {
+    case 'IMPORT_DATA': {
+      const nextState = {
         ...state,
         ...action.payload,
         settings: {
@@ -796,6 +1114,9 @@ function financeReducer(state: FinanceState, action: Action): FinanceState {
         },
         currentMonth: action.payload.currentMonth || action.payload.selectedMonth || state.currentMonth,
       };
+      const syncedCurrentMonth = syncCurrentMonthRecurringIncomeAutoBookings(nextState, now);
+      return syncedCurrentMonth ? { ...nextState, ...syncedCurrentMonth } : nextState;
+    }
     case 'RESET_DATA':
     case 'RESET_ALL':
       return initialState;
