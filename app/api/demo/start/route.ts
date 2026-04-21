@@ -2,6 +2,7 @@ import { NextResponse } from 'next/server';
 import { kv } from '@vercel/kv';
 import bcrypt from 'bcryptjs';
 import { buildDemoState } from '@/src/utils/demoData';
+import type { FinanceState } from '@/src/types';
 
 const DEMO_TTL = 60 * 60 * 24; // 24 hours
 
@@ -46,11 +47,11 @@ export async function POST() {
       'freelanceProjects',
       'workSessions',
       'freelanceInvoices',
-    ] as const;
+    ] as const satisfies readonly (keyof FinanceState)[];
 
     await Promise.all([
       ...entityKeys.map((key) =>
-        kv.set(`user:${userId}:${key}`, (state as Record<string, unknown>)[key] ?? [], { ex: DEMO_TTL })
+        kv.set(`user:${userId}:${key}`, state[key] ?? [], { ex: DEMO_TTL })
       ),
       kv.set(`user:${userId}:invoiceProfile`, state.invoiceProfile, { ex: DEMO_TTL }),
       kv.set(`user:${userId}:settings`, state.settings, { ex: DEMO_TTL }),
