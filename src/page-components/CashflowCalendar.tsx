@@ -22,6 +22,7 @@ type LedgerDirection = 'in' | 'out' | 'transfer';
 type LedgerOrigin = 'income' | 'expense' | 'fixedExpense' | 'debt' | 'transfer';
 type LedgerDeleteAction = 'DELETE_INCOME' | 'DELETE_EXPENSE' | 'DELETE_FIXED_EXPENSE' | 'DELETE_DEBT' | 'DELETE_TRANSFER';
 type EditableEntityType = 'income' | 'expense' | 'fixedExpense' | 'debt' | 'transfer';
+type StatementRange = '3m' | '6m' | '12m' | 'all';
 
 interface LedgerNoteMeta {
   displayNote?: string;
@@ -89,6 +90,14 @@ interface LedgerEntry extends RawLedgerEntry {
   direction: LedgerDirection;
   signedAmount: number;
   runningBalanceAfter?: number;
+}
+
+interface LedgerDateGroup {
+  date: string;
+  entries: LedgerEntry[];
+  incoming: number;
+  outgoing: number;
+  transferVolume: number;
 }
 
 const FALLBACK_INFO = {
@@ -201,10 +210,39 @@ function getDateLabel(date: string): string {
   return formatDate(date, 'EEEE, dd.MM.yyyy');
 }
 
+function groupLedgerEntriesByDate(entries: LedgerEntry[]): LedgerDateGroup[] {
+  const groups = new Map<string, LedgerEntry[]>();
+
+  entries.forEach((entry) => {
+    const existing = groups.get(entry.date);
+    if (existing) {
+      existing.push(entry);
+      return;
+    }
+    groups.set(entry.date, [entry]);
+  });
+
+  return Array.from(groups.entries()).map(([date, grouped]) => ({
+    date,
+    entries: grouped,
+    incoming: grouped.filter((entry) => entry.signedAmount > 0).reduce((sum, entry) => sum + entry.signedAmount, 0),
+    outgoing: grouped.filter((entry) => entry.signedAmount < 0).reduce((sum, entry) => sum + Math.abs(entry.signedAmount), 0),
+    transferVolume: grouped
+      .filter((entry) => entry.direction === 'transfer' && entry.signedAmount === 0)
+      .reduce((sum, entry) => sum + entry.amount, 0),
+  }));
+}
+
+function getStatementRangeStartMonth(range: StatementRange, endMonth: string): string | null {
+  if (range === 'all') return null;
+  const offset = range === '3m' ? 2 : range === '6m' ? 5 : 11;
+  return shiftMonth(endMonth, -offset);
+}
+
 export function CashflowCalendar() {
   const router = useRouter();
   const { state, dispatch } = useFinance();
-  const { settings, incomes, fixedExpenses, debts, expenses, transfers, selectedMonth, currentMonth, accounts } = state;
+  const { settings, incomes, fixedExpenses, debts, expenses, transfers, autoBookings, selectedMonth, currentMonth, accounts } = state;
   const [viewMonth, setViewMonth] = useState(selectedMonth);
   const [accountFilter, setAccountFilter] = useState('all');
   const [directionFilter, setDirectionFilter] = useState<'all' | LedgerDirection>('all');
@@ -212,6 +250,8 @@ export function CashflowCalendar() {
   const [search, setSearch] = useState('');
   const [selectedEntry, setSelectedEntry] = useState<LedgerEntry | null>(null);
   const [editForm, setEditForm] = useState<LedgerEditFormState | null>(null);
+  const [statementAccountId, setStatementAccountId] = useState('');
+  const [statementRange, setStatementRange] = useState<StatementRange>('6m');
 
   useEffect(() => {
     setViewMonth(selectedMonth);
@@ -223,10 +263,25 @@ export function CashflowCalendar() {
     }
   }, [accountFilter, accounts]);
 
+  useEffect(() => {
+    if (statementAccountId && accounts.some((account) => account.id === statementAccountId)) {
+      return;
+    }
+
+    const defaultAccountId =
+      accounts.find((account) => account.isDefault)?.id
+      || accounts.find((account) => account.type !== 'investment')?.id
+      || accounts[0]?.id
+      || '';
+
+    setStatementAccountId(defaultAccountId);
+  }, [accounts, statementAccountId]);
+
   const accountMap = useMemo(() => new Map(accounts.map((account) => [account.id, account])), [accounts]);
   const fixedExpenseMap = useMemo(() => new Map(fixedExpenses.map((fixedExpense) => [fixedExpense.id, fixedExpense])), [fixedExpenses]);
   const debtMap = useMemo(() => new Map(debts.map((debt) => [debt.id, debt])), [debts]);
   const selectedAccount = accountFilter !== 'all' ? accountMap.get(accountFilter) || null : null;
+  const selectedStatementAccount = statementAccountId ? accountMap.get(statementAccountId) || null : null;
 
   const monthExpenses = useMemo(
     () => expenses.filter((expense) => expense.month === viewMonth),
@@ -595,27 +650,311 @@ export function CashflowCalendar() {
     });
   }, [accountFilter, directionFilter, rawEntries, search, selectedAccount, statusFilter]);
 
-  const groupedEntries = useMemo(() => {
-    const groups = new Map<string, LedgerEntry[]>();
-    ledgerEntries.forEach((entry) => {
-      const existing = groups.get(entry.date);
-      if (existing) {
-        existing.push(entry);
-      } else {
-        groups.set(entry.date, [entry]);
+  const bookedEntries = useMemo(
+    () => ledgerEntries.filter((entry) => entry.status === 'booked'),
+    [ledgerEntries]
+  );
+  const plannedEntries = useMemo(
+    () => ledgerEntries.filter((entry) => entry.status === 'planned'),
+    [ledgerEntries]
+  );
+  const ledgerSections = useMemo(
+    () => [
+      {
+        key: 'booked',
+        title: 'Gebucht',
+        description: 'Bereits verbuchte Umsätze im gewählten Monat.',
+        badgeColor: '#2563eb',
+        entries: bookedEntries,
+        groups: groupLedgerEntriesByDate(bookedEntries),
+      },
+      {
+        key: 'planned',
+        title: 'Vorgemerkt',
+        description: 'Offene oder erwartete Buchungen, die noch nicht verbucht sind.',
+        badgeColor: '#d97706',
+        entries: plannedEntries,
+        groups: groupLedgerEntriesByDate(plannedEntries),
+      },
+    ].filter((section) => section.entries.length > 0),
+    [bookedEntries, plannedEntries]
+  );
+
+  const statementEntries = useMemo(() => {
+    if (!selectedStatementAccount) {
+      return [] as LedgerEntry[];
+    }
+
+    const entries: LedgerEntry[] = [];
+
+    incomes.forEach((income) => {
+      const affectsBalance = income.affectsAccountBalance ?? (!income.isRecurring && Boolean(income.accountId));
+      if (income.accountId !== selectedStatementAccount.id || !affectsBalance || income.isRecurring) {
+        return;
       }
+
+      const incomeInfo = INCOME_TYPES[income.type] || FALLBACK_INFO;
+      const noteMeta = parseLedgerNoteMeta(income.note);
+      const postingDate = income.date || clampDateToMonth(income.month || income.createdAt.slice(0, 7), 1);
+
+      entries.push({
+        id: `statement-income-${income.id}`,
+        origin: 'income',
+        sourceId: income.id,
+        date: postingDate,
+        title: income.name,
+        amount: income.amount,
+        status: 'booked',
+        icon: incomeInfo.icon,
+        color: incomeInfo.color,
+        sourceLabel: 'Einnahme',
+        categoryLabel: incomeInfo.labelDe,
+        detail: [incomeInfo.labelDe, selectedStatementAccount.name, isBankImportedIncome(income) ? 'Bankimport' : 'Verbucht']
+          .filter(Boolean)
+          .join(' • '),
+        note: income.note,
+        displayNote: noteMeta.displayNote,
+        accountId: selectedStatementAccount.id,
+        accountName: selectedStatementAccount.name,
+        recurring: income.isRecurring,
+        imported: isBankImportedIncome(income),
+        entityType: 'income',
+        counterparty: income.name,
+        valueDate: postingDate,
+        importSource: noteMeta.importSource,
+        importAccount: noteMeta.importAccount,
+        pageHref: '/income',
+        pageLabel: 'Zu Einnahmen',
+        deleteActionType: 'DELETE_INCOME',
+        deleteActionLabel: 'Einnahme löschen',
+        direction: 'in',
+        signedAmount: income.amount,
+      });
     });
 
-    return Array.from(groups.entries()).map(([date, entries]) => ({
-      date,
+    autoBookings.forEach((booking) => {
+      if (booking.sourceType !== 'recurringIncome' || booking.accountId !== selectedStatementAccount.id) {
+        return;
+      }
+
+      const income = incomes.find((entry) => entry.id === booking.sourceId || entry.id === booking.bookedIncomeId);
+      const incomeInfo = income ? INCOME_TYPES[income.type] || FALLBACK_INFO : FALLBACK_INFO;
+      const noteMeta = parseLedgerNoteMeta(income?.note);
+      const postingDate = income ? resolveIncomeDate(booking.month, income) : clampDateToMonth(booking.month, 1);
+
+      entries.push({
+        id: `statement-autobooking-${booking.id}`,
+        origin: 'income',
+        sourceId: income?.id || booking.sourceId,
+        date: postingDate,
+        title: income?.name || 'Wiederkehrende Einnahme',
+        amount: booking.amount,
+        status: 'booked',
+        icon: incomeInfo.icon,
+        color: incomeInfo.color,
+        sourceLabel: 'Auto-Buchung',
+        categoryLabel: incomeInfo.labelDe,
+        detail: [incomeInfo.labelDe, selectedStatementAccount.name, 'Automatisch verbucht'].filter(Boolean).join(' • '),
+        note: income?.note,
+        displayNote: noteMeta.displayNote,
+        accountId: selectedStatementAccount.id,
+        accountName: selectedStatementAccount.name,
+        recurring: true,
+        entityType: 'income',
+        counterparty: income?.name || 'Wiederkehrende Einnahme',
+        valueDate: postingDate,
+        importSource: noteMeta.importSource,
+        importAccount: noteMeta.importAccount,
+        pageHref: '/income',
+        pageLabel: 'Zu Einnahmen',
+        deleteActionType: 'DELETE_INCOME',
+        deleteActionLabel: 'Einnahme löschen',
+        direction: 'in',
+        signedAmount: booking.amount,
+      });
+    });
+
+    expenses.forEach((expense) => {
+      const affectsBalance = expense.affectsAccountBalance ?? Boolean(expense.accountId);
+      if (expense.accountId !== selectedStatementAccount.id || !affectsBalance || expense.isPlanned) {
+        return;
+      }
+
+      const matchedFixedExpense = expense.autoBookedType === 'fixedExpense' && expense.autoBookedFromId
+        ? fixedExpenseMap.get(expense.autoBookedFromId)
+        : undefined;
+      const linkedDebt = expense.linkedDebtId ? debtMap.get(expense.linkedDebtId) : undefined;
+      const noteMeta = parseLedgerNoteMeta(expense.note);
+      const expenseInfo = matchedFixedExpense
+        ? FIXED_EXPENSE_CATEGORIES[matchedFixedExpense.category]
+        : linkedDebt
+          ? DEBT_TYPES[linkedDebt.type]
+          : getExpenseCategoryInfo(expense.category, settings);
+      const sourceLabel = linkedDebt ? 'Kreditrate' : matchedFixedExpense ? 'Fixkosten' : 'Ausgabe';
+      const categoryLabel = linkedDebt
+        ? linkedDebt.name
+        : matchedFixedExpense
+          ? FIXED_EXPENSE_CATEGORIES[matchedFixedExpense.category]?.labelDe || FALLBACK_INFO.labelDe
+          : getExpenseCategoryInfo(expense.category, settings).labelDe;
+
+      entries.push({
+        id: `statement-expense-${expense.id}`,
+        origin: linkedDebt ? 'debt' : 'expense',
+        sourceId: expense.id,
+        date: expense.date,
+        title: expense.description,
+        amount: expense.amount,
+        status: 'booked',
+        icon: expenseInfo.icon,
+        color: expenseInfo.color,
+        sourceLabel,
+        categoryLabel,
+        detail: [sourceLabel, categoryLabel, selectedStatementAccount.name].filter(Boolean).join(' • '),
+        note: expense.note,
+        displayNote: noteMeta.displayNote,
+        accountId: selectedStatementAccount.id,
+        accountName: selectedStatementAccount.name,
+        recurring: expense.isRecurring,
+        imported: isBankImportedExpense(expense.note, expense.tags),
+        tags: expense.tags,
+        entityType: 'expense',
+        counterparty: expense.description,
+        valueDate: expense.date,
+        importSource: noteMeta.importSource,
+        importAccount: noteMeta.importAccount,
+        pageHref: '/expenses',
+        pageLabel: 'Zu Ausgaben',
+        deleteActionType: 'DELETE_EXPENSE',
+        deleteActionLabel: linkedDebt ? 'Rate löschen' : 'Buchung löschen',
+        direction: 'out',
+        signedAmount: -expense.amount,
+      });
+    });
+
+    transfers.forEach((transfer) => {
+      const isOutgoing = transfer.fromAccountId === selectedStatementAccount.id;
+      const isIncoming = transfer.toAccountId === selectedStatementAccount.id;
+      if (!isOutgoing && !isIncoming) {
+        return;
+      }
+
+      const noteMeta = parseLedgerNoteMeta(transfer.note);
+      const counterpartAccount = accountMap.get(isOutgoing ? transfer.toAccountId : transfer.fromAccountId);
+
+      entries.push({
+        id: `statement-transfer-${transfer.id}-${selectedStatementAccount.id}`,
+        origin: 'transfer',
+        sourceId: transfer.id,
+        date: transfer.date,
+        title: transfer.note || 'Umbuchung',
+        amount: transfer.amount,
+        status: 'booked',
+        icon: 'ArrowRightLeft',
+        color: '#0f766e',
+        sourceLabel: 'Umbuchung',
+        detail: isOutgoing
+          ? `${selectedStatementAccount.name} → ${counterpartAccount?.name || 'Unbekannt'}`
+          : `${counterpartAccount?.name || 'Unbekannt'} → ${selectedStatementAccount.name}`,
+        note: transfer.note,
+        displayNote: noteMeta.displayNote,
+        accountId: selectedStatementAccount.id,
+        accountName: selectedStatementAccount.name,
+        secondaryAccountId: counterpartAccount?.id,
+        secondaryAccountName: counterpartAccount?.name,
+        entityType: 'transfer',
+        counterparty: counterpartAccount?.name || 'Unbekannt',
+        valueDate: transfer.date,
+        importSource: noteMeta.importSource,
+        importAccount: noteMeta.importAccount,
+        pageHref: '/accounts',
+        pageLabel: 'Zu Konten',
+        deleteActionType: 'DELETE_TRANSFER',
+        deleteActionLabel: 'Umbuchung löschen',
+        direction: isOutgoing ? 'out' : 'in',
+        signedAmount: isOutgoing ? -transfer.amount : transfer.amount,
+      });
+    });
+
+    const sortedEntries = entries.sort((left, right) => {
+      const dateSort = right.date.localeCompare(left.date);
+      if (dateSort !== 0) return dateSort;
+      return right.id.localeCompare(left.id);
+    });
+
+    let rollingBalance = selectedStatementAccount.balance;
+    return sortedEntries.map((entry) => {
+      const entryWithBalance: LedgerEntry = {
+        ...entry,
+        runningBalanceAfter: roundStatementBalance(rollingBalance),
+      };
+      rollingBalance = roundStatementBalance(rollingBalance - entry.signedAmount);
+      return entryWithBalance;
+    });
+  }, [accountMap, autoBookings, debtMap, expenses, fixedExpenseMap, incomes, selectedStatementAccount, settings, transfers]);
+
+  const statementStartMonth = useMemo(
+    () => getStatementRangeStartMonth(statementRange, viewMonth),
+    [statementRange, viewMonth]
+  );
+  const statementVisibleEntries = useMemo(
+    () => statementEntries.filter((entry) => {
+      const entryMonth = entry.date.slice(0, 7);
+      if (entryMonth > viewMonth) {
+        return false;
+      }
+      if (statementStartMonth && entryMonth < statementStartMonth) {
+        return false;
+      }
+      return true;
+    }),
+    [statementEntries, statementStartMonth, viewMonth]
+  );
+  const statementMonthGroups = useMemo(() => {
+    const groups = new Map<string, LedgerEntry[]>();
+
+    statementVisibleEntries.forEach((entry) => {
+      const monthKey = entry.date.slice(0, 7);
+      const existing = groups.get(monthKey);
+      if (existing) {
+        existing.push(entry);
+        return;
+      }
+      groups.set(monthKey, [entry]);
+    });
+
+    return Array.from(groups.entries()).map(([month, entries]) => ({
+      month,
+      label: getMonthDisplayName(month),
       entries,
       incoming: entries.filter((entry) => entry.signedAmount > 0).reduce((sum, entry) => sum + entry.signedAmount, 0),
       outgoing: entries.filter((entry) => entry.signedAmount < 0).reduce((sum, entry) => sum + Math.abs(entry.signedAmount), 0),
-      transferVolume: entries
-        .filter((entry) => entry.direction === 'transfer' && entry.signedAmount === 0)
-        .reduce((sum, entry) => sum + entry.amount, 0),
+      closingBalance: entries[0]?.runningBalanceAfter,
+      openingBalance: entries.length > 0 && entries[entries.length - 1].runningBalanceAfter !== undefined
+        ? roundStatementBalance((entries[entries.length - 1].runningBalanceAfter || 0) - entries[entries.length - 1].signedAmount)
+        : undefined,
     }));
-  }, [ledgerEntries]);
+  }, [statementVisibleEntries]);
+  const statementSummary = useMemo(() => {
+    if (!selectedStatementAccount) {
+      return null;
+    }
+
+    const latestEntry = statementVisibleEntries[0];
+    const oldestEntry = statementVisibleEntries[statementVisibleEntries.length - 1];
+    const closingBalance = latestEntry?.runningBalanceAfter;
+    const openingBalance = oldestEntry?.runningBalanceAfter !== undefined
+      ? roundStatementBalance((oldestEntry.runningBalanceAfter || 0) - oldestEntry.signedAmount)
+      : undefined;
+
+    return {
+      currentBalance: selectedStatementAccount.balance,
+      closingBalance,
+      openingBalance,
+      incoming: statementVisibleEntries.filter((entry) => entry.signedAmount > 0).reduce((sum, entry) => sum + entry.signedAmount, 0),
+      outgoing: statementVisibleEntries.filter((entry) => entry.signedAmount < 0).reduce((sum, entry) => sum + Math.abs(entry.signedAmount), 0),
+      count: statementVisibleEntries.length,
+    };
+  }, [selectedStatementAccount, statementVisibleEntries]);
 
   const summary = useMemo(() => {
     return ledgerEntries.reduce(
@@ -634,6 +973,10 @@ export function CashflowCalendar() {
 
   const accountOptions = useMemo(
     () => [{ value: 'all', label: 'Alle Konten' }, ...accounts.map((account) => ({ value: account.id, label: account.name }))],
+    [accounts]
+  );
+  const statementAccountOptions = useMemo(
+    () => accounts.map((account) => ({ value: account.id, label: account.name })),
     [accounts]
   );
   const bookingAccountOptions = useMemo(
@@ -670,6 +1013,12 @@ export function CashflowCalendar() {
     { value: 'all', label: 'Gebucht + geplant' },
     { value: 'booked', label: 'Nur gebucht' },
     { value: 'planned', label: 'Nur geplant' },
+  ];
+  const statementRangeOptions = [
+    { value: '3m', label: 'Letzte 3 Monate' },
+    { value: '6m', label: 'Letzte 6 Monate' },
+    { value: '12m', label: 'Letzte 12 Monate' },
+    { value: 'all', label: 'Komplette Historie' },
   ];
 
   const headerContext = accountFilter === 'all'
@@ -1058,72 +1407,229 @@ export function CashflowCalendar() {
           />
         ) : (
           <div className="divide-y divide-slate-200 dark:divide-gray-800">
-            {groupedEntries.map((group) => (
-              <div key={group.date} className="px-4 py-4 sm:px-6">
-                <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
-                  <div>
-                    <p className="text-sm font-semibold capitalize text-slate-950 dark:text-white">{getDateLabel(group.date)}</p>
-                    <p className="text-xs text-slate-500 dark:text-slate-400">{formatDate(group.date)}</p>
-                  </div>
-                  <div className="flex flex-wrap gap-2">
-                    {group.incoming > 0 && <Badge color="#059669">+{formatCurrency(group.incoming, settings)}</Badge>}
-                    {group.outgoing > 0 && <Badge color="#dc2626">-{formatCurrency(group.outgoing, settings)}</Badge>}
-                    {group.transferVolume > 0 && <Badge color="#0f766e">Umbuchung {formatCurrency(group.transferVolume, settings)}</Badge>}
+            {ledgerSections.map((section) => (
+              <div key={section.key} className="bg-white/60 dark:bg-gray-950/20">
+                <div className="border-b border-slate-200/80 px-4 py-4 dark:border-gray-800 sm:px-6">
+                  <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+                    <div>
+                      <div className="flex flex-wrap items-center gap-2">
+                        <p className="text-sm font-semibold text-slate-950 dark:text-white">{section.title}</p>
+                        <Badge color={section.badgeColor}>{section.entries.length} Buchungen</Badge>
+                      </div>
+                      <p className="mt-1 text-xs text-slate-500 dark:text-slate-400">{section.description}</p>
+                    </div>
+                    <div className="flex flex-wrap gap-2">
+                      {section.entries.some((entry) => entry.signedAmount > 0) && (
+                        <Badge color="#059669">
+                          +{formatCurrency(section.entries.filter((entry) => entry.signedAmount > 0).reduce((sum, entry) => sum + entry.signedAmount, 0), settings)}
+                        </Badge>
+                      )}
+                      {section.entries.some((entry) => entry.signedAmount < 0) && (
+                        <Badge color="#dc2626">
+                          -{formatCurrency(section.entries.filter((entry) => entry.signedAmount < 0).reduce((sum, entry) => sum + Math.abs(entry.signedAmount), 0), settings)}
+                        </Badge>
+                      )}
+                    </div>
                   </div>
                 </div>
 
-                <div className="space-y-2">
-                  {group.entries.map((entry) => {
-                    const isPositive = entry.signedAmount > 0;
-                    const isNeutralTransfer = entry.direction === 'transfer' && entry.signedAmount === 0;
-                    return (
-                      <button
-                        key={entry.id}
-                        type="button"
-                        onClick={() => setSelectedEntry(entry)}
-                        className="group flex w-full items-center gap-4 rounded-2xl border border-slate-200 px-4 py-4 text-left transition-all hover:border-slate-300 hover:bg-slate-50/70 dark:border-gray-800 dark:hover:border-gray-700 dark:hover:bg-gray-900/70"
-                      >
-                        <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-2xl" style={{ backgroundColor: `${entry.color}18` }}>
-                          <Icon name={entry.icon} size={20} color={entry.color} />
+                <div className="divide-y divide-slate-200/80 dark:divide-gray-800">
+                  {section.groups.map((group) => (
+                    <div key={`${section.key}-${group.date}`} className="px-4 py-4 sm:px-6">
+                      <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
+                        <div>
+                          <p className="text-sm font-semibold capitalize text-slate-950 dark:text-white">{getDateLabel(group.date)}</p>
+                          <p className="text-xs text-slate-500 dark:text-slate-400">{formatDate(group.date)}</p>
                         </div>
+                        <div className="flex flex-wrap gap-2">
+                          {group.incoming > 0 && <Badge color="#059669">+{formatCurrency(group.incoming, settings)}</Badge>}
+                          {group.outgoing > 0 && <Badge color="#dc2626">-{formatCurrency(group.outgoing, settings)}</Badge>}
+                          {group.transferVolume > 0 && <Badge color="#0f766e">Umbuchung {formatCurrency(group.transferVolume, settings)}</Badge>}
+                        </div>
+                      </div>
 
-                        <div className="min-w-0 flex-1">
-                          <div className="flex flex-wrap items-center gap-2">
-                            <p className="truncate text-sm font-semibold text-slate-950 dark:text-white">{entry.title}</p>
-                            <Badge color={entry.direction === 'in' ? '#059669' : entry.direction === 'out' ? '#dc2626' : '#0f766e'}>
-                              {getDirectionLabel(entry.direction)}
-                            </Badge>
-                            <Badge color={entry.status === 'booked' ? '#2563eb' : '#d97706'}>{getStatusLabel(entry.status)}</Badge>
-                            <Badge color="#64748b">Valuta {formatDate(entry.valueDate, 'dd.MM.')}</Badge>
-                            {entry.imported && <Badge color="#475569">Import</Badge>}
-                            {entry.recurring && <Badge color="#7c3aed">Wiederkehrend</Badge>}
-                          </div>
-                          <p className="mt-1 truncate text-xs text-slate-500 dark:text-slate-400">
-                            {[entry.counterparty && entry.counterparty !== entry.title ? `Gegenpartei: ${entry.counterparty}` : '', entry.detail].filter(Boolean).join(' • ')}
-                          </p>
-                          {(entry.displayNote || entry.importSource) && (
-                            <p className="mt-1 truncate text-xs text-slate-400 dark:text-slate-500">
-                              {entry.displayNote || `Quelle: ${entry.importSource}`}
-                            </p>
-                          )}
-                        </div>
+                      <div className="space-y-2">
+                        {group.entries.map((entry) => {
+                          const isPositive = entry.signedAmount > 0;
+                          const isNeutralTransfer = entry.direction === 'transfer' && entry.signedAmount === 0;
+                          return (
+                            <button
+                              key={entry.id}
+                              type="button"
+                              onClick={() => setSelectedEntry(entry)}
+                              className="group flex w-full items-center gap-4 rounded-2xl border border-slate-200 px-4 py-4 text-left transition-all hover:border-slate-300 hover:bg-slate-50/70 dark:border-gray-800 dark:hover:border-gray-700 dark:hover:bg-gray-900/70"
+                            >
+                              <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-2xl" style={{ backgroundColor: `${entry.color}18` }}>
+                                <Icon name={entry.icon} size={20} color={entry.color} />
+                              </div>
 
-                        <div className="shrink-0 text-right">
-                          <p className={`text-sm font-semibold ${isNeutralTransfer ? 'text-slate-700 dark:text-slate-200' : isPositive ? 'text-emerald-600 dark:text-emerald-400' : 'text-rose-600 dark:text-rose-400'}`}>
-                            {getAmountLabel(entry, settings)}
-                          </p>
-                          {selectedAccount && entry.runningBalanceAfter !== undefined ? (
-                            <p className="mt-1 text-xs text-slate-500 dark:text-slate-400">Saldo {formatCurrency(entry.runningBalanceAfter, settings)}</p>
-                          ) : (
-                            <p className="mt-1 text-xs text-slate-400 transition-colors group-hover:text-slate-500 dark:text-slate-500 dark:group-hover:text-slate-400">Details öffnen</p>
-                          )}
-                        </div>
-                      </button>
-                    );
-                  })}
+                              <div className="min-w-0 flex-1">
+                                <div className="flex flex-wrap items-center gap-2">
+                                  <p className="truncate text-sm font-semibold text-slate-950 dark:text-white">{entry.title}</p>
+                                  <Badge color={entry.direction === 'in' ? '#059669' : entry.direction === 'out' ? '#dc2626' : '#0f766e'}>
+                                    {getDirectionLabel(entry.direction)}
+                                  </Badge>
+                                  <Badge color={entry.status === 'booked' ? '#2563eb' : '#d97706'}>{getStatusLabel(entry.status)}</Badge>
+                                  <Badge color="#64748b">Valuta {formatDate(entry.valueDate, 'dd.MM.')}</Badge>
+                                  {entry.imported && <Badge color="#475569">Import</Badge>}
+                                  {entry.recurring && <Badge color="#7c3aed">Wiederkehrend</Badge>}
+                                </div>
+                                <p className="mt-1 truncate text-xs text-slate-500 dark:text-slate-400">
+                                  {[entry.counterparty && entry.counterparty !== entry.title ? `Gegenpartei: ${entry.counterparty}` : '', entry.detail].filter(Boolean).join(' • ')}
+                                </p>
+                                {(entry.displayNote || entry.importSource) && (
+                                  <p className="mt-1 truncate text-xs text-slate-400 dark:text-slate-500">
+                                    {entry.displayNote || `Quelle: ${entry.importSource}`}
+                                  </p>
+                                )}
+                              </div>
+
+                              <div className="shrink-0 text-right">
+                                <p className={`text-sm font-semibold ${isNeutralTransfer ? 'text-slate-700 dark:text-slate-200' : isPositive ? 'text-emerald-600 dark:text-emerald-400' : 'text-rose-600 dark:text-rose-400'}`}>
+                                  {getAmountLabel(entry, settings)}
+                                </p>
+                                {selectedAccount && entry.runningBalanceAfter !== undefined ? (
+                                  <p className="mt-1 text-xs text-slate-500 dark:text-slate-400">Saldo {formatCurrency(entry.runningBalanceAfter, settings)}</p>
+                                ) : (
+                                  <p className="mt-1 text-xs text-slate-400 transition-colors group-hover:text-slate-500 dark:text-slate-500 dark:group-hover:text-slate-400">Details öffnen</p>
+                                )}
+                              </div>
+                            </button>
+                          );
+                        })}
+                      </div>
+                    </div>
+                  ))}
                 </div>
               </div>
             ))}
+          </div>
+        )}
+      </Card>
+
+      <Card className="overflow-hidden">
+        <div className="border-b border-slate-200 bg-[linear-gradient(135deg,rgba(240,249,255,0.9)_0%,rgba(236,253,245,0.7)_100%)] p-5 dark:border-gray-800 dark:bg-[linear-gradient(135deg,rgba(8,47,73,0.35)_0%,rgba(6,78,59,0.28)_100%)] sm:p-6">
+          <div className="flex flex-col gap-4 xl:flex-row xl:items-end xl:justify-between">
+            <div>
+              <p className="text-xs font-semibold uppercase tracking-[0.22em] text-cyan-700 dark:text-cyan-300">Kontoauszug</p>
+              <h3 className="mt-2 text-2xl font-bold tracking-tight text-slate-950 dark:text-white">Drilldown pro Konto mit fortlaufendem Saldo</h3>
+              <p className="mt-2 max-w-2xl text-sm text-slate-600 dark:text-slate-300">
+                Mehrmonatiger Auszug bis {getMonthDisplayName(viewMonth)}. Berücksichtigt echte Konto-Bewegungen inklusive Umbuchungen und automatisch gebuchte wiederkehrende Einnahmen.
+              </p>
+            </div>
+
+            <div className="grid gap-3 md:grid-cols-2 xl:min-w-[30rem]">
+              <Select label="Auszugskonto" value={statementAccountId} onChange={setStatementAccountId} options={statementAccountOptions} />
+              <Select label="Zeitraum" value={statementRange} onChange={(value) => setStatementRange(value as StatementRange)} options={statementRangeOptions} />
+            </div>
+          </div>
+        </div>
+
+        {!selectedStatementAccount ? (
+          <EmptyState
+            icon="Wallet"
+            title="Kein Konto für den Auszug ausgewählt"
+            description="Wähle oben ein Konto aus, um den fortlaufenden Kontoauszug zu sehen."
+          />
+        ) : statementVisibleEntries.length === 0 ? (
+          <EmptyState
+            icon="ScrollText"
+            title="Keine Konto-Bewegungen im gewählten Zeitraum"
+            description="Für dieses Konto gibt es in der gewählten Historie noch keine verbuchten Umsätze."
+          />
+        ) : (
+          <div className="space-y-6 p-5 sm:p-6">
+            <div className="grid gap-3 lg:grid-cols-4">
+              <div className="rounded-2xl border border-slate-200 bg-white/80 p-4 dark:border-gray-800 dark:bg-gray-900/60">
+                <p className="text-xs font-medium text-slate-500 dark:text-slate-400">Aktueller Kontostand</p>
+                <p className="mt-2 text-xl font-bold text-slate-950 dark:text-white">{formatCurrency(statementSummary?.currentBalance || 0, settings)}</p>
+                <p className="mt-1 text-xs text-slate-500 dark:text-slate-400">Live-Saldo des ausgewählten Kontos</p>
+              </div>
+              <div className="rounded-2xl border border-cyan-200/80 bg-cyan-50/70 p-4 dark:border-cyan-900/50 dark:bg-cyan-950/20">
+                <p className="text-xs font-medium text-cyan-700 dark:text-cyan-300">Schlusssaldo Zeitraum</p>
+                <p className="mt-2 text-xl font-bold text-cyan-800 dark:text-cyan-100">
+                  {statementSummary?.closingBalance !== undefined ? formatCurrency(statementSummary.closingBalance, settings) : '—'}
+                </p>
+                <p className="mt-1 text-xs text-cyan-700/80 dark:text-cyan-300/80">Saldo nach der jüngsten sichtbaren Buchung</p>
+              </div>
+              <div className="rounded-2xl border border-amber-200/80 bg-amber-50/70 p-4 dark:border-amber-900/50 dark:bg-amber-950/20">
+                <p className="text-xs font-medium text-amber-700 dark:text-amber-300">Anfangssaldo Zeitraum</p>
+                <p className="mt-2 text-xl font-bold text-amber-800 dark:text-amber-100">
+                  {statementSummary?.openingBalance !== undefined ? formatCurrency(statementSummary.openingBalance, settings) : '—'}
+                </p>
+                <p className="mt-1 text-xs text-amber-700/80 dark:text-amber-300/80">Saldo vor der ältesten sichtbaren Buchung</p>
+              </div>
+              <div className="rounded-2xl border border-emerald-200/80 bg-emerald-50/70 p-4 dark:border-emerald-900/50 dark:bg-emerald-950/20">
+                <p className="text-xs font-medium text-emerald-700 dark:text-emerald-300">Umsatzvolumen</p>
+                <p className="mt-2 text-xl font-bold text-emerald-800 dark:text-emerald-100">{statementSummary?.count || 0}</p>
+                <p className="mt-1 text-xs text-emerald-700/80 dark:text-emerald-300/80">
+                  +{formatCurrency(statementSummary?.incoming || 0, settings)} / -{formatCurrency(statementSummary?.outgoing || 0, settings)}
+                </p>
+              </div>
+            </div>
+
+            <div className="divide-y divide-slate-200 dark:divide-gray-800">
+              {statementMonthGroups.map((group) => (
+                <div key={group.month} className="py-5 first:pt-0 last:pb-0">
+                  <div className="mb-4 flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
+                    <div>
+                      <p className="text-lg font-semibold text-slate-950 dark:text-white">{group.label}</p>
+                      <p className="mt-1 text-xs text-slate-500 dark:text-slate-400">
+                        Anfang {group.openingBalance !== undefined ? formatCurrency(group.openingBalance, settings) : '—'} • Ende {group.closingBalance !== undefined ? formatCurrency(group.closingBalance, settings) : '—'}
+                      </p>
+                    </div>
+                    <div className="flex flex-wrap gap-2">
+                      {group.incoming > 0 && <Badge color="#059669">+{formatCurrency(group.incoming, settings)}</Badge>}
+                      {group.outgoing > 0 && <Badge color="#dc2626">-{formatCurrency(group.outgoing, settings)}</Badge>}
+                      <Badge color="#0f172a">{group.entries.length} Umsätze</Badge>
+                    </div>
+                  </div>
+
+                  <div className="space-y-2">
+                    {group.entries.map((entry) => {
+                      const isPositive = entry.signedAmount > 0;
+                      return (
+                        <button
+                          key={entry.id}
+                          type="button"
+                          onClick={() => setSelectedEntry(entry)}
+                          className="group grid gap-3 rounded-2xl border border-slate-200 px-4 py-4 text-left transition-all hover:border-slate-300 hover:bg-slate-50/70 dark:border-gray-800 dark:hover:border-gray-700 dark:hover:bg-gray-900/70 md:grid-cols-[7.5rem_minmax(0,1fr)_11rem] md:items-center"
+                        >
+                          <div>
+                            <p className="text-sm font-semibold text-slate-950 dark:text-white">{formatDate(entry.date, 'dd.MM.yyyy')}</p>
+                            <p className="mt-1 text-xs text-slate-500 dark:text-slate-400">Valuta {formatDate(entry.valueDate, 'dd.MM.yyyy')}</p>
+                          </div>
+
+                          <div className="min-w-0">
+                            <div className="flex flex-wrap items-center gap-2">
+                              <p className="truncate text-sm font-semibold text-slate-950 dark:text-white">{entry.title}</p>
+                              <Badge color={entry.direction === 'in' ? '#059669' : '#dc2626'}>{getDirectionLabel(entry.direction)}</Badge>
+                              {entry.imported && <Badge color="#475569">Import</Badge>}
+                              {entry.recurring && <Badge color="#7c3aed">Wiederkehrend</Badge>}
+                            </div>
+                            <p className="mt-1 truncate text-xs text-slate-500 dark:text-slate-400">
+                              {[entry.counterparty && entry.counterparty !== entry.title ? `Gegenpartei: ${entry.counterparty}` : '', entry.detail].filter(Boolean).join(' • ')}
+                            </p>
+                            {(entry.displayNote || entry.importSource) && (
+                              <p className="mt-1 truncate text-xs text-slate-400 dark:text-slate-500">{entry.displayNote || `Quelle: ${entry.importSource}`}</p>
+                            )}
+                          </div>
+
+                          <div className="text-left md:text-right">
+                            <p className={`text-sm font-semibold ${isPositive ? 'text-emerald-600 dark:text-emerald-400' : 'text-rose-600 dark:text-rose-400'}`}>
+                              {getAmountLabel(entry, settings)}
+                            </p>
+                            <p className="mt-1 text-xs text-slate-500 dark:text-slate-400">
+                              Saldo {entry.runningBalanceAfter !== undefined ? formatCurrency(entry.runningBalanceAfter, settings) : '—'}
+                            </p>
+                          </div>
+                        </button>
+                      );
+                    })}
+                  </div>
+                </div>
+              ))}
+            </div>
           </div>
         )}
       </Card>
