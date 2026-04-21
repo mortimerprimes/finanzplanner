@@ -933,7 +933,7 @@ function financeReducer(state: FinanceState, action: Action): FinanceState {
           const [yr, mo] = month.split('-').map(Number);
           const lastDay = new Date(yr, mo, 0).getDate();
           const day = Math.min(fe.dueDay, lastDay);
-          const expense = withExpenseAccountTracking({
+          const expense: Expense = withExpenseAccountTracking<Expense>({
             id: bookedExpenseId,
             description: `${fe.name}${fe.linkedDebtId ? ' (Kreditrate)' : ''}`,
             amount: fe.amount,
