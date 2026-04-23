@@ -1,6 +1,6 @@
-import { useState, useMemo } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { useFinance } from '@/lib/finance-context';
-import { Card, Button, Input, Select, Modal, EmptyState, Icon, ProgressBar } from '../components/ui';
+import { Badge, Card, Button, Input, Select, Modal, EmptyState, Icon, PageHeader, ProgressBar } from '../components/ui';
 import { formatCurrency, getExpenseCategoryMap, getExpenseCategoryInfo, getActiveBudgetLimits, getBudgetLimitValue } from '../utils/helpers';
 import { BudgetLimit, ExpenseCategory } from '../types';
 import { Pencil, Trash2, AlertTriangle, RotateCcw, CalendarDays } from 'lucide-react';
@@ -59,23 +59,50 @@ export function BudgetPage() {
   const budgetedCategories = new Set(activeBudgets.map(b => b.category));
   const unbudgetedSpent = monthExpenses.filter(e => !budgetedCategories.has(e.category)).reduce((s, e) => s + e.amount, 0);
 
+  useEffect(() => {
+    const openBudgetModal = () => openModal();
+    const toggleBudgetWeekly = () => setShowWeekly((current) => !current);
+
+    window.addEventListener('budget-open-create', openBudgetModal);
+    window.addEventListener('budget-toggle-weekly', toggleBudgetWeekly);
+
+    return () => {
+      window.removeEventListener('budget-open-create', openBudgetModal);
+      window.removeEventListener('budget-toggle-weekly', toggleBudgetWeekly);
+    };
+  }, []);
+
   return (
     <div className="space-y-6 animate-fade-in">
-      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
-        <div>
-          <h2 className="text-lg font-bold text-gray-900 dark:text-white">Budgetplanung</h2>
-          <p className="text-sm text-slate-500 dark:text-gray-500">
-            {formatCurrency(totalSpent, settings)} von {formatCurrency(totalBudget, settings)} ausgegeben
-          </p>
-        </div>
-        <Button onClick={() => openModal()} icon="Plus">Budget hinzufügen</Button>
-        <button
-          onClick={() => setShowWeekly(v => !v)}
-          className={`rounded-xl border px-3 py-2 text-xs font-medium transition-colors ${showWeekly ? 'border-blue-300 bg-blue-50 text-blue-700 dark:border-blue-700 dark:bg-blue-950/30 dark:text-blue-300' : 'border-slate-200 text-gray-700 dark:border-gray-700 dark:text-gray-300'}`}
-        >
-          <CalendarDays size={14} className="inline mr-1" /> Wochenansicht
-        </button>
-      </div>
+      <PageHeader
+        eyebrow="Planen"
+        title="Budgetplanung"
+        description={`${formatCurrency(totalSpent, settings)} von ${formatCurrency(totalBudget, settings)} ausgegeben${unbudgetedSpent > 0 ? ` · ${formatCurrency(unbudgetedSpent, settings)} ohne Budgetlimit` : ''}`}
+        badges={(
+          <>
+            <Badge color="#2563eb">Monat: {currentMonth}</Badge>
+            <Badge color={showWeekly ? '#2563eb' : '#64748b'}>{showWeekly ? 'Wochenansicht aktiv' : 'Monatsansicht aktiv'}</Badge>
+            {activeBudgets.length > 0 && <Badge color="#0f766e">{activeBudgets.length} Budgettöpfe</Badge>}
+          </>
+        )}
+        actions={(
+          <>
+            <Button onClick={() => openModal()} icon="Plus">Budget hinzufügen</Button>
+            <button
+              onClick={() => setShowWeekly(v => !v)}
+              className={`inline-flex items-center justify-center gap-2 rounded-xl border px-3 py-2 text-sm font-medium transition-colors ${showWeekly ? 'border-blue-300 bg-blue-50 text-blue-700 dark:border-blue-700 dark:bg-blue-950/30 dark:text-blue-300' : 'border-slate-200 text-gray-700 dark:border-gray-700 dark:text-gray-300'}`}
+            >
+              <CalendarDays size={14} /> Wochenansicht
+            </button>
+          </>
+        )}
+        secondary={(
+          <div className="flex flex-wrap gap-2 text-xs text-slate-500 dark:text-gray-500">
+            <span className="rounded-full bg-slate-100 px-3 py-1.5 dark:bg-gray-800">Kategorie auswählen, Budget setzen, Fortschritt monatlich prüfen.</span>
+            {unbudgetedSpent > 0 && <span className="rounded-full bg-amber-50 px-3 py-1.5 text-amber-700 dark:bg-amber-950/30 dark:text-amber-300">Ein Teil deiner Ausgaben liegt noch außerhalb von Budgetlimits.</span>}
+          </div>
+        )}
+      />
 
       {/* Summary Cards */}
       <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">

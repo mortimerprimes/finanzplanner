@@ -2,83 +2,34 @@
 
 import { useState } from 'react';
 import Link from 'next/link';
-import { usePathname, useRouter } from 'next/navigation';
+import { usePathname } from 'next/navigation';
 import {
-  LayoutDashboard, TrendingUp, Receipt, CreditCard, PiggyBank,
-  Wallet, Landmark, Settings, BarChart3, Menu, X,
-  ChevronLeft, ChevronRight, Sun, Moon, Monitor, Target, CalendarDays,
-  CalendarRange, FileBarChart, Shield, Flag, Image, Zap, Clock,
+  Menu, X,
+  ChevronLeft, ChevronRight, Sun, Moon, Monitor, CalendarDays,
   ChevronDown, AlertTriangle, LogIn, ArrowRight
 } from 'lucide-react';
 import { useTheme } from '@/src/hooks/useTheme';
 import { useFinance } from '@/lib/finance-context';
-import { getMonthDisplayName, getMonthPickerRange, shiftMonth } from '@/src/utils/helpers';
+import { getMonthDisplayName, getMonthPickerRange } from '@/src/utils/helpers';
+import {
+  DEMO_FOOTER_NAV_ITEMS,
+  DEMO_NAV_GROUPS,
+  getDefaultCollapsedLabels,
+  isNavItemActive,
+} from '@/src/utils/appNavigation';
 import { Modal } from '@/src/components/ui';
-
-interface NavItem { href: string; label: string; icon: typeof LayoutDashboard; }
-interface NavGroup { label: string; items: NavItem[]; }
-
-const BASE = '/demo';
-
-const navGroups: NavGroup[] = [
-  {
-    label: 'Übersicht',
-    items: [
-      { href: `${BASE}/dashboard`, label: 'Dashboard', icon: LayoutDashboard },
-      { href: `${BASE}/analytics`, label: 'Analysen', icon: BarChart3 },
-      { href: `${BASE}/cashflow`, label: 'Cashflow', icon: CalendarRange },
-      { href: `${BASE}/annual-report`, label: 'Jahresbericht', icon: FileBarChart },
-    ],
-  },
-  {
-    label: 'Finanzen',
-    items: [
-      { href: `${BASE}/income`, label: 'Einnahmen', icon: TrendingUp },
-      { href: `${BASE}/fixed-expenses`, label: 'Fixkosten', icon: Receipt },
-      { href: `${BASE}/debts`, label: 'Schulden', icon: CreditCard },
-      { href: `${BASE}/expenses`, label: 'Ausgaben', icon: Wallet },
-      { href: `${BASE}/budget`, label: 'Budgets', icon: Target },
-    ],
-  },
-  {
-    label: 'Vermögen',
-    items: [
-      { href: `${BASE}/savings`, label: 'Sparziele', icon: PiggyBank },
-      { href: `${BASE}/finance-goals`, label: 'Finanzziele', icon: Flag },
-      { href: `${BASE}/accounts`, label: 'Konten', icon: Landmark },
-    ],
-  },
-  {
-    label: 'Berichte & Tools',
-    items: [
-      { href: `${BASE}/finance-score`, label: 'Finanz-Score', icon: Shield },
-      { href: `${BASE}/freelance`, label: 'Freelance', icon: Zap },
-      { href: `${BASE}/receipts`, label: 'Belege', icon: Image },
-      { href: `${BASE}/bank-sync`, label: 'Bank-Sync', icon: CalendarDays },
-    ],
-  },
-  {
-    label: 'Verlauf & Einstellungen',
-    items: [
-      { href: `${BASE}/activity-log`, label: 'Aktivitätslog', icon: Clock },
-      { href: `${BASE}/category-rules`, label: 'Kategorie-Regeln', icon: Settings },
-      { href: `${BASE}/settings`, label: 'Einstellungen', icon: Settings },
-    ],
-  },
-];
 
 export function DemoAppLayout({ children }: { children: React.ReactNode }) {
   const [sidebarOpen, setSidebarOpen] = useState(true);
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
   const [monthPickerOpen, setMonthPickerOpen] = useState(false);
-  const [collapsedGroups, setCollapsedGroups] = useState<Set<string>>(new Set());
+  const [collapsedGroups, setCollapsedGroups] = useState<Set<string>>(() => getDefaultCollapsedLabels(DEMO_NAV_GROUPS));
   const { theme, setTheme, resolvedTheme } = useTheme();
   const { state, dispatch } = useFinance();
   const pathname = usePathname();
-  const router = useRouter();
 
-  const allNavItems = navGroups.flatMap(g => g.items);
-  const currentNavItem = allNavItems.find(item => pathname === item.href);
+  const allNavItems = [...DEMO_NAV_GROUPS.flatMap((group) => group.items), ...DEMO_FOOTER_NAV_ITEMS];
+  const currentNavItem = allNavItems.find((item) => isNavItemActive(pathname, item));
   const sidebarW = sidebarOpen ? 260 : 72;
 
   const toggleGroup = (label: string) => {
@@ -147,9 +98,9 @@ export function DemoAppLayout({ children }: { children: React.ReactNode }) {
         )}
 
         <nav className="flex-1 py-3 px-3 space-y-0.5 overflow-y-auto">
-          {navGroups.map((group) => {
+          {DEMO_NAV_GROUPS.map((group) => {
             const isCollapsed = collapsedGroups.has(group.label);
-            const hasActiveItem = group.items.some(item => pathname === item.href);
+            const hasActiveItem = group.items.some((item) => isNavItemActive(pathname, item));
             return (
               <div key={group.label}>
                 {sidebarOpen && (
@@ -163,7 +114,7 @@ export function DemoAppLayout({ children }: { children: React.ReactNode }) {
                 )}
                 {(!isCollapsed || !sidebarOpen) && group.items.map((item) => {
                   const ItemIcon = item.icon;
-                  const isActive = pathname === item.href;
+                  const isActive = isNavItemActive(pathname, item);
                   return (
                     <Link
                       key={item.href}
@@ -181,12 +132,43 @@ export function DemoAppLayout({ children }: { children: React.ReactNode }) {
                     </Link>
                   );
                 })}
+                {isCollapsed && sidebarOpen && hasActiveItem && group.items.filter((item) => isNavItemActive(pathname, item)).map((item) => {
+                  const ItemIcon = item.icon;
+                  return (
+                    <Link
+                      key={item.href}
+                      href={item.href}
+                      className="w-full flex items-center gap-3 rounded-xl px-3 py-2 bg-blue-600 text-white shadow-md shadow-blue-600/25"
+                    >
+                      <ItemIcon size={18} className="flex-shrink-0" />
+                      <span className="text-sm font-medium whitespace-nowrap">{item.label}</span>
+                    </Link>
+                  );
+                })}
               </div>
             );
           })}
         </nav>
 
         <div className="p-3 border-t border-slate-200 dark:border-gray-800 flex-shrink-0 space-y-1">
+          {DEMO_FOOTER_NAV_ITEMS.map((item) => {
+            const ItemIcon = item.icon;
+            const isActive = isNavItemActive(pathname, item);
+            return (
+              <Link
+                key={item.href}
+                href={item.href}
+                className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-xl transition-all duration-200 ${!sidebarOpen && 'justify-center'} ${
+                  isActive
+                    ? 'bg-blue-600 text-white shadow-md shadow-blue-600/25'
+                    : 'text-slate-600 dark:text-gray-400 hover:bg-slate-100 dark:hover:bg-gray-800 hover:text-slate-900 dark:hover:text-white'
+                }`}
+              >
+                <ItemIcon size={20} className="flex-shrink-0" />
+                {sidebarOpen && <span className="text-sm font-medium whitespace-nowrap">{item.label}</span>}
+              </Link>
+            );
+          })}
           <button
             onClick={cycleTheme}
             className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-xl text-slate-600 dark:text-gray-400 hover:bg-slate-100 dark:hover:bg-gray-800 transition-all duration-200 ${!sidebarOpen && 'justify-center'}`}
@@ -230,14 +212,14 @@ export function DemoAppLayout({ children }: { children: React.ReactNode }) {
           <div className="lg:hidden fixed inset-0 z-40 bg-black/40 animate-overlay" onClick={() => setMobileMenuOpen(false)} />
           <div className="lg:hidden fixed top-14 left-0 bottom-0 z-40 w-64 bg-white dark:bg-gray-900 border-r border-slate-200 dark:border-gray-800 animate-fade-in overflow-y-auto">
             <nav className="py-3 px-3 space-y-0.5">
-              {navGroups.map((group) => (
+              {DEMO_NAV_GROUPS.map((group) => (
                 <div key={group.label}>
                   <p className="px-3 py-1.5 mt-2 mb-0.5 text-[10px] font-bold uppercase tracking-[0.12em] text-slate-400 dark:text-gray-600">
                     {group.label}
                   </p>
                   {group.items.map((item) => {
                     const ItemIcon = item.icon;
-                    const isActive = pathname === item.href;
+                    const isActive = isNavItemActive(pathname, item);
                     return (
                       <Link
                         key={item.href}
@@ -254,6 +236,25 @@ export function DemoAppLayout({ children }: { children: React.ReactNode }) {
                   })}
                 </div>
               ))}
+              <div className="pt-3 mt-3 border-t border-slate-200 dark:border-gray-800">
+                {DEMO_FOOTER_NAV_ITEMS.map((item) => {
+                  const ItemIcon = item.icon;
+                  const isActive = isNavItemActive(pathname, item);
+                  return (
+                    <Link
+                      key={item.href}
+                      href={item.href}
+                      onClick={() => setMobileMenuOpen(false)}
+                      className={`w-full flex items-center gap-3 px-3 py-2 rounded-xl transition-all ${
+                        isActive ? 'bg-blue-600 text-white shadow-md' : 'text-slate-600 dark:text-gray-400 hover:bg-slate-100 dark:hover:bg-gray-800'
+                      }`}
+                    >
+                      <ItemIcon size={18} />
+                      <span className="text-sm font-medium">{item.label}</span>
+                    </Link>
+                  );
+                })}
+              </div>
               <div className="pt-2">
                 <Link
                   href="/login"

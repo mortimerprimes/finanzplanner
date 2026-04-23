@@ -79,7 +79,7 @@ export const DEFAULT_SETTINGS = {
   backupProvider: 'local-folder' as const,
   backupFrequency: 'manual' as const,
   quickEntry: true,
-  dashboardWidgets: ['summary', 'budget', 'expense-overview', 'recent-expenses', 'savings', 'quick-stats'],
+  dashboardWidgets: ['recent-expenses', 'expense-overview', 'savings', 'quick-stats'],
   customExpenseCategories: [],
   lastUsedExpenseCategory: 'food',
   lastUsedAccountId: undefined,

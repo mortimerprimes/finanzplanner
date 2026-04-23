@@ -1,10 +1,10 @@
-import { useState, useEffect, useRef, useCallback } from 'react';
+import { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import { Search, X } from 'lucide-react';
 import { useFinance } from '@/lib/finance-context';
 import { Icon } from './ui';
 import { globalSearch, SearchResult } from '../utils/helpers';
 import { buildSearchResultHref } from '../utils/searchFocus';
-import { useRouter } from 'next/navigation';
+import { usePathname, useRouter } from 'next/navigation';
 
 interface GlobalSearchProps {
   buttonClassName?: string;
@@ -21,65 +21,349 @@ interface QuickAction {
   action: () => void;
 }
 
+interface QuickActionSection {
+  id: string;
+  title: string;
+  description: string;
+  items: QuickAction[];
+}
+
+interface IndexedQuickAction extends QuickAction {
+  listIndex: number;
+}
+
+interface IndexedQuickActionSection extends Omit<QuickActionSection, 'items'> {
+  items: IndexedQuickAction[];
+}
+
 export function GlobalSearch({ buttonClassName, iconOnly = false }: GlobalSearchProps) {
   const { state } = useFinance();
   const router = useRouter();
+  const pathname = usePathname();
   const [open, setOpen] = useState(false);
   const [query, setQuery] = useState('');
   const [results, setResults] = useState<SearchResult[]>([]);
   const [selectedIndex, setSelectedIndex] = useState(0);
   const inputRef = useRef<HTMLInputElement>(null);
+  const isGuidedMode = state.settings.userExperience.mode === 'guided';
+  const hasFreelanceWorkspace = state.settings.userExperience.profile !== 'personal';
 
-  const quickActions: QuickAction[] = [
-    {
-      id: 'setup',
-      title: 'Einrichtungsassistent öffnen',
-      subtitle: 'Geführtes Setup für Konto, Einnahmen und Fixkosten',
-      icon: 'Sparkles',
-      color: '#2563eb',
-      badge: 'Setup',
-      action: () => {
-        window.dispatchEvent(new CustomEvent('open-onboarding'));
-        setOpen(false);
-      },
-    },
-    {
-      id: 'quick-capture',
-      title: 'Schnellerfassung starten',
-      subtitle: 'Direkt eine Ausgabe, Einnahme oder Fixkosten erfassen',
+  const quickActionSections = useMemo<IndexedQuickActionSection[]>(() => {
+    const runAndClose = (action: () => void) => () => {
+      action();
+      setOpen(false);
+    };
+
+    let contextSection: QuickActionSection | null = null;
+
+    if (pathname.startsWith('/dashboard')) {
+      contextSection = {
+        id: 'context-dashboard',
+        title: 'Aktueller Bereich: Dashboard',
+        description: 'Direktaktionen für Monatsabschluss und erweiterte Einblicke.',
+        items: [
+          {
+            id: 'dashboard-month-end',
+            title: 'Monatsabschluss öffnen',
+            subtitle: 'Öffnet den Assistenten für Abschluss und Rückblick',
+            icon: 'ClipboardCheck',
+            color: '#2563eb',
+            badge: 'Hier',
+            action: runAndClose(() => window.dispatchEvent(new CustomEvent('dashboard-open-month-end'))),
+          },
+          {
+            id: 'dashboard-toggle-advanced',
+            title: 'Erweiterte Einblicke umschalten',
+            subtitle: 'Blendet tiefere Widgets im Dashboard ein oder aus',
+            icon: 'LineChart',
+            color: '#7c3aed',
+            badge: 'Hier',
+            action: runAndClose(() => window.dispatchEvent(new CustomEvent('dashboard-toggle-advanced-insights'))),
+          },
+        ],
+      };
+    } else if (pathname.startsWith('/expenses')) {
+      contextSection = {
+        id: 'context-expenses',
+        title: 'Aktueller Bereich: Ausgaben',
+        description: 'Erfassung, Filter und Helfer für die laufende Buchungsansicht.',
+        items: [
+          {
+            id: 'expenses-create',
+            title: 'Ausgabe erfassen',
+            subtitle: 'Öffnet direkt den Eingabedialog dieser Seite',
+            icon: 'Plus',
+            color: '#10b981',
+            badge: 'Hier',
+            action: runAndClose(() => window.dispatchEvent(new CustomEvent('expenses-open-create'))),
+          },
+          {
+            id: 'expenses-filters',
+            title: 'Filter öffnen',
+            subtitle: 'Blendet Suche und Filter für diese Liste ein',
+            icon: 'SlidersHorizontal',
+            color: '#2563eb',
+            badge: 'Hier',
+            action: runAndClose(() => window.dispatchEvent(new CustomEvent('expenses-open-filters'))),
+          },
+          {
+            id: 'expenses-helpers',
+            title: 'Erfassungshelfer öffnen',
+            subtitle: 'Zeigt Beleganalyse, Spracheingabe und Auswahlmodus',
+            icon: 'Sparkles',
+            color: '#8b5cf6',
+            badge: 'Hier',
+            action: runAndClose(() => window.dispatchEvent(new CustomEvent('expenses-open-helpers'))),
+          },
+        ],
+      };
+    } else if (pathname.startsWith('/accounts')) {
+      contextSection = {
+        id: 'context-accounts',
+        title: 'Aktueller Bereich: Konten',
+        description: 'Häufige Kontoaktionen, ohne die Übersicht zu verlassen.',
+        items: [
+          {
+            id: 'accounts-create',
+            title: 'Konto hinzufügen',
+            subtitle: 'Öffnet direkt den Kontodialog',
+            icon: 'Plus',
+            color: '#2563eb',
+            badge: 'Hier',
+            action: runAndClose(() => window.dispatchEvent(new CustomEvent('accounts-open-create'))),
+          },
+          {
+            id: 'accounts-transfer',
+            title: 'Transfer starten',
+            subtitle: 'Öffnet den Transferdialog auf der Kontoseite',
+            icon: 'ArrowRightLeft',
+            color: '#0f766e',
+            badge: 'Hier',
+            action: runAndClose(() => window.dispatchEvent(new CustomEvent('accounts-open-transfer'))),
+          },
+          {
+            id: 'accounts-import',
+            title: 'Kontoauszug importieren',
+            subtitle: 'Startet direkt den Importdialog',
+            icon: 'Upload',
+            color: '#f59e0b',
+            badge: 'Hier',
+            action: runAndClose(() => window.dispatchEvent(new CustomEvent('accounts-open-import'))),
+          },
+        ],
+      };
+    } else if (pathname.startsWith('/budget')) {
+      contextSection = {
+        id: 'context-budget',
+        title: 'Aktueller Bereich: Budget',
+        description: 'Budgets anlegen und die Sicht auf den Zeitraum anpassen.',
+        items: [
+          {
+            id: 'budget-create',
+            title: 'Budget hinzufügen',
+            subtitle: 'Öffnet direkt den Budgetdialog',
+            icon: 'Plus',
+            color: '#2563eb',
+            badge: 'Hier',
+            action: runAndClose(() => window.dispatchEvent(new CustomEvent('budget-open-create'))),
+          },
+          {
+            id: 'budget-weekly',
+            title: 'Wochenansicht umschalten',
+            subtitle: 'Wechselt zwischen Wochen- und Monatsblick',
+            icon: 'CalendarDays',
+            color: '#0f766e',
+            badge: 'Hier',
+            action: runAndClose(() => window.dispatchEvent(new CustomEvent('budget-toggle-weekly'))),
+          },
+        ],
+      };
+    } else if (pathname.startsWith('/settings')) {
+      contextSection = {
+        id: 'context-settings',
+        title: 'Aktueller Bereich: Einstellungen',
+        description: 'Springe direkt in den passenden Einstellungsbereich.',
+        items: [
+          {
+            id: 'settings-basics',
+            title: 'Alltag öffnen',
+            subtitle: 'Bedienung, Setup-Hinweise und Basispräferenzen',
+            icon: 'SlidersHorizontal',
+            color: '#2563eb',
+            badge: 'Hier',
+            action: runAndClose(() => window.dispatchEvent(new CustomEvent('settings-open-section', { detail: { section: 'basics' } }))),
+          },
+          {
+            id: 'settings-workspace',
+            title: 'Oberfläche öffnen',
+            subtitle: 'Navigation, Dashboard und Kategorien anpassen',
+            icon: 'LayoutDashboard',
+            color: '#8b5cf6',
+            badge: 'Hier',
+            action: runAndClose(() => window.dispatchEvent(new CustomEvent('settings-open-section', { detail: { section: 'workspace' } }))),
+          },
+          {
+            id: 'settings-automation',
+            title: 'Automationen öffnen',
+            subtitle: 'Erinnerungen, AI und Benachrichtigungen prüfen',
+            icon: 'Bot',
+            color: '#0f766e',
+            badge: 'Hier',
+            action: runAndClose(() => window.dispatchEvent(new CustomEvent('settings-open-section', { detail: { section: 'automation' } }))),
+          },
+        ],
+      };
+    }
+
+    const primaryActions: QuickAction[] = [];
+
+    if (!state.settings.userExperience.initialSetupCompleted || isGuidedMode) {
+      primaryActions.push({
+        id: 'setup',
+        title: 'Einrichtungsassistent öffnen',
+        subtitle: 'Geführtes Setup für Konto, Einnahmen und Fixkosten',
+        icon: 'Sparkles',
+        color: '#2563eb',
+        badge: 'Setup',
+        action: runAndClose(() => window.dispatchEvent(new CustomEvent('open-onboarding'))),
+      });
+    }
+
+    primaryActions.push({
+      id: 'capture-expense',
+      title: 'Ausgabe erfassen',
+      subtitle: 'Direkt eine neue Ausgabe oder einen Beleg starten',
       icon: 'Plus',
       color: '#10b981',
-      badge: 'Aktion',
-      action: () => {
-        window.dispatchEvent(new CustomEvent('open-quick-capture', { detail: { type: 'expense' } }));
-        setOpen(false);
+      badge: 'Alltag',
+      action: runAndClose(() => window.dispatchEvent(new CustomEvent('open-quick-capture', { detail: { type: 'expense' } }))),
+    });
+
+    if (!isGuidedMode) {
+      primaryActions.push({
+        id: 'capture-income',
+        title: 'Einnahme erfassen',
+        subtitle: 'Gehalt, Erstattung oder Nebenverdienst eintragen',
+        icon: 'TrendingUp',
+        color: '#0f766e',
+        badge: 'Alltag',
+        action: runAndClose(() => window.dispatchEvent(new CustomEvent('open-quick-capture', { detail: { type: 'income' } }))),
+      });
+    }
+
+    primaryActions.push(
+      isGuidedMode
+        ? {
+            id: 'open-budget',
+            title: 'Budgets prüfen',
+            subtitle: 'Restbeträge, Warnungen und Monatsbudget öffnen',
+            icon: 'Wallet',
+            color: '#7c3aed',
+            badge: 'Uebersicht',
+            action: runAndClose(() => router.push('/budget')),
+          }
+        : {
+            id: 'open-dashboard',
+            title: 'Dashboard öffnen',
+            subtitle: 'Fokus, Kennzahlen und heutige Aktionen ansehen',
+            icon: 'LayoutDashboard',
+            color: '#2563eb',
+            badge: 'Uebersicht',
+            action: runAndClose(() => router.push('/dashboard')),
+          }
+    );
+
+    const supportActions: QuickAction[] = [
+      {
+        id: 'shortcuts',
+        title: 'Tastenkürzel anzeigen',
+        subtitle: 'Kurzbefehle und Suchtricks auf einen Blick',
+        icon: 'Keyboard',
+        color: '#8b5cf6',
+        badge: 'Hilfe',
+        action: runAndClose(() => window.dispatchEvent(new CustomEvent('show-shortcuts'))),
       },
-    },
-    {
-      id: 'shortcuts',
-      title: 'Tastenkürzel anzeigen',
-      subtitle: 'Alle Kurzbefehle und Suchtricks auf einen Blick',
-      icon: 'Keyboard',
-      color: '#8b5cf6',
-      badge: 'Hilfe',
-      action: () => {
-        window.dispatchEvent(new CustomEvent('show-shortcuts'));
-        setOpen(false);
+    ];
+
+    if (!isGuidedMode) {
+      supportActions.unshift({
+        id: 'bank-sync',
+        title: 'Kontoauszug importieren',
+        subtitle: 'Zum Import-Flow für CSV, ELBA und MT940',
+        icon: 'Upload',
+        color: '#f59e0b',
+        badge: 'Import',
+        action: runAndClose(() => router.push('/bank-sync')),
+      });
+    }
+
+    if (hasFreelanceWorkspace) {
+      supportActions.unshift({
+        id: 'freelance',
+        title: 'Freelance-Bereich öffnen',
+        subtitle: 'Projekte, Rechnungen und Limits im Blick behalten',
+        icon: 'Briefcase',
+        color: '#9333ea',
+        badge: 'Bereich',
+        action: runAndClose(() => router.push('/freelance')),
+      });
+    }
+
+    const sections: QuickActionSection[] = [
+      contextSection,
+      {
+        id: 'primary',
+        title: isGuidedMode ? 'Häufig gebraucht' : 'Direkt starten',
+        description: isGuidedMode ? 'Alltagsaufgaben ohne Umwege.' : 'Schnelle Aktionen für den häufigsten Einstieg.',
+        items: primaryActions,
       },
-    },
-    {
-      id: 'bank-sync',
-      title: 'Kontoauszug importieren',
-      subtitle: 'Zum Import-Flow für CSV, ELBA und MT940',
-      icon: 'Upload',
-      color: '#f59e0b',
-      badge: 'Import',
-      action: () => {
-        router.push('/bank-sync');
-        setOpen(false);
+      {
+        id: 'support',
+        title: 'Mehr Optionen',
+        description: 'Hilfen und weiterführende Bereiche.',
+        items: supportActions,
       },
-    },
-  ];
+    ].filter((section): section is QuickActionSection => Boolean(section && section.items.length > 0));
+
+    let offset = 0;
+    return sections.map((section) => {
+      const items = section.items.map((item, index) => ({
+        ...item,
+        listIndex: offset + index,
+      }));
+      offset += items.length;
+      return {
+        ...section,
+        items,
+      };
+    });
+  }, [hasFreelanceWorkspace, isGuidedMode, pathname, router, state.settings.userExperience.initialSetupCompleted]);
+
+  const quickActions = useMemo(() => quickActionSections.flatMap((section) => section.items), [quickActionSections]);
+
+  const searchSuggestions = useMemo(() => {
+    const suggestions = new Set<string>();
+    const addSuggestion = (value?: string) => {
+      const trimmed = value?.trim();
+      if (trimmed && trimmed.length >= 2) {
+        suggestions.add(trimmed);
+      }
+    };
+
+    state.expenses.slice(0, 2).forEach((item) => addSuggestion(item.description));
+    state.fixedExpenses.slice(0, 1).forEach((item) => addSuggestion(item.name));
+    state.incomes.slice(0, 1).forEach((item) => addSuggestion(item.name));
+
+    if (hasFreelanceWorkspace) {
+      state.freelanceProjects.slice(0, 1).forEach((item) => addSuggestion(item.clientName || item.name));
+    }
+
+    if (suggestions.size === 0) {
+      (isGuidedMode ? ['Miete', 'Supermarkt', 'Gehalt'] : ['Miete', 'Kreditkarte', 'Rechnung']).forEach(addSuggestion);
+    }
+
+    return Array.from(suggestions).slice(0, 4);
+  }, [hasFreelanceWorkspace, isGuidedMode, state.expenses, state.fixedExpenses, state.freelanceProjects, state.incomes]);
 
   // Keyboard shortcut: / or Cmd/Ctrl+K to open
   useEffect(() => {
@@ -197,27 +481,46 @@ export function GlobalSearch({ buttonClassName, iconOnly = false }: GlobalSearch
           </div>
 
           {showQuickActions && (
-            <div className="max-h-80 overflow-y-auto p-2">
-              {quickActions.map((item, index) => (
-                <button
-                  key={item.id}
-                  onClick={item.action}
-                  className={`flex w-full items-center gap-3 rounded-xl px-3 py-2.5 text-left transition-colors ${
-                    index === selectedIndex ? 'bg-blue-50 dark:bg-blue-950/30' : 'hover:bg-slate-50 dark:hover:bg-gray-800/50'
-                  }`}
-                >
-                  <div className="rounded-lg p-1.5" style={{ backgroundColor: `${item.color}15` }}>
-                    <Icon name={item.icon} size={16} color={item.color} />
+            <div className="max-h-80 overflow-y-auto p-3">
+              <div className="mb-4 rounded-2xl border border-slate-200 bg-slate-50/80 px-4 py-3 dark:border-gray-800 dark:bg-gray-800/40">
+                <p className="text-sm font-semibold text-gray-900 dark:text-white">Schnell starten oder direkt suchen</p>
+                <p className="mt-1 text-xs text-slate-500 dark:text-gray-500">
+                  Tippe mindestens 2 Buchstaben, um Buchungen, Ziele und Projekte zu finden. Solange das Feld leer ist, siehst du die wichtigsten Einstiege und, auf Kernseiten, direkte Aktionen für den aktuellen Bereich.
+                </p>
+              </div>
+
+              <div className="space-y-4">
+                {quickActionSections.map((section) => (
+                  <div key={section.id}>
+                    <div className="mb-2 px-1">
+                      <p className="text-[11px] font-semibold uppercase tracking-[0.16em] text-slate-400 dark:text-gray-500">{section.title}</p>
+                      <p className="mt-1 text-xs text-slate-500 dark:text-gray-500">{section.description}</p>
+                    </div>
+                    <div className="space-y-1.5">
+                      {section.items.map((item) => (
+                        <button
+                          key={item.id}
+                          onClick={item.action}
+                          className={`flex w-full items-center gap-3 rounded-xl px-3 py-2.5 text-left transition-colors ${
+                            item.listIndex === selectedIndex ? 'bg-blue-50 dark:bg-blue-950/30' : 'hover:bg-slate-50 dark:hover:bg-gray-800/50'
+                          }`}
+                        >
+                          <div className="rounded-lg p-1.5" style={{ backgroundColor: `${item.color}15` }}>
+                            <Icon name={item.icon} size={16} color={item.color} />
+                          </div>
+                          <div className="min-w-0 flex-1">
+                            <p className="truncate text-sm font-medium text-gray-900 dark:text-white">{item.title}</p>
+                            <p className="truncate text-xs text-slate-500 dark:text-gray-500">{item.subtitle}</p>
+                          </div>
+                          <span className="flex-shrink-0 rounded-full bg-slate-100 px-2 py-0.5 text-[10px] font-medium text-slate-500 dark:bg-gray-800 dark:text-gray-500">
+                            {item.badge}
+                          </span>
+                        </button>
+                      ))}
+                    </div>
                   </div>
-                  <div className="min-w-0 flex-1">
-                    <p className="truncate text-sm font-medium text-gray-900 dark:text-white">{item.title}</p>
-                    <p className="truncate text-xs text-slate-500 dark:text-gray-500">{item.subtitle}</p>
-                  </div>
-                  <span className="flex-shrink-0 rounded-full bg-slate-100 px-2 py-0.5 text-[10px] font-medium text-slate-500 dark:bg-gray-800 dark:text-gray-500">
-                    {item.badge}
-                  </span>
-                </button>
-              ))}
+                ))}
+              </div>
             </div>
           )}
 
@@ -253,8 +556,27 @@ export function GlobalSearch({ buttonClassName, iconOnly = false }: GlobalSearch
           )}
 
           {showQuickActions && (
-            <div className="p-4 text-center text-xs text-slate-400 dark:text-gray-600">
-              Schnellaktionen oben · <kbd className="rounded border px-1">↑↓</kbd> navigieren · <kbd className="rounded border px-1">Enter</kbd> ausführen
+            <div className="border-t border-slate-200 px-4 py-3 dark:border-gray-800">
+              {searchSuggestions.length > 0 && (
+                <div>
+                  <p className="text-[11px] font-semibold uppercase tracking-[0.16em] text-slate-400 dark:text-gray-500">Suchideen</p>
+                  <div className="mt-2 flex flex-wrap gap-2">
+                    {searchSuggestions.map((suggestion) => (
+                      <button
+                        key={suggestion}
+                        type="button"
+                        onClick={() => handleSearch(suggestion)}
+                        className="rounded-full border border-slate-200 bg-white px-3 py-1.5 text-xs font-medium text-slate-600 transition-colors hover:border-slate-300 hover:bg-slate-50 dark:border-gray-700 dark:bg-gray-900 dark:text-gray-300 dark:hover:border-gray-600 dark:hover:bg-gray-800"
+                      >
+                        {suggestion}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              )}
+              <p className="mt-3 text-center text-xs text-slate-400 dark:text-gray-600">
+                <kbd className="rounded border px-1">↑↓</kbd> navigieren · <kbd className="rounded border px-1">Enter</kbd> ausführen · <kbd className="rounded border px-1">Esc</kbd> schließen
+              </p>
             </div>
           )}
         </div>

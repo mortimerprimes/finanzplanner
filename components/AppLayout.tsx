@@ -2,17 +2,25 @@
 
 import { useEffect, useState } from 'react';
 import Link from 'next/link';
-import { usePathname } from 'next/navigation';
+import { usePathname, useRouter } from 'next/navigation';
 import { signOut } from 'next-auth/react';
 import {
-  LayoutDashboard, TrendingUp, Receipt, CreditCard, PiggyBank,
-  Wallet, Landmark, RefreshCw, Settings, BarChart3, Menu, X,
-  ChevronLeft, ChevronRight, Sun, Moon, Monitor, Target, CalendarDays, LogOut, UserCircle,
-  CalendarRange, FileBarChart, Crown, Clock, Shield, Flag, Image, Zap, ChevronDown
+  Menu, X,
+  ChevronLeft, ChevronRight, Sun, Moon, Monitor, CalendarDays, LogOut, ChevronDown
 } from 'lucide-react';
 import { useTheme } from '@/src/hooks/useTheme';
 import { useFinance } from '@/lib/finance-context';
 import { getMonthDisplayName, getMonthPickerRange, shiftMonth } from '@/src/utils/helpers';
+import {
+  APP_FOOTER_NAV_ITEMS,
+  APP_MOBILE_NAV_ITEMS,
+  APP_NAV_GROUPS,
+  buildExperienceHiddenItemSet,
+  filterNavGroups,
+  filterNavItems,
+  getDefaultCollapsedLabels,
+  isNavItemActive,
+} from '@/src/utils/appNavigation';
 import { Button, Modal } from '@/src/components/ui';
 import { QuickCaptureFab } from '@/src/components/QuickCaptureFab';
 import { NotificationBell } from '@/components/NotificationBell';
@@ -23,100 +31,16 @@ import { useSession } from 'next-auth/react';
 import { BudgetFeedbackToast } from '@/src/components/BudgetFeedbackToast';
 import { OnboardingWizard } from '@/src/components/OnboardingWizard';
 
-interface NavItem {
-  href: string;
-  label: string;
-  icon: typeof LayoutDashboard;
-  adminOnly?: boolean;
-}
-
-interface NavGroup {
-  label: string;
-  items: NavItem[];
-}
-
-const navGroups: NavGroup[] = [
-  {
-    label: 'Übersicht',
-    items: [
-      { href: '/dashboard', label: 'Dashboard', icon: LayoutDashboard },
-      { href: '/analytics', label: 'Analysen', icon: BarChart3 },
-      { href: '/cashflow', label: 'Cashflow', icon: CalendarRange },
-    ],
-  },
-  {
-    label: 'Finanzen',
-    items: [
-      { href: '/income', label: 'Einnahmen', icon: TrendingUp },
-      { href: '/fixed-expenses', label: 'Fixkosten', icon: Receipt },
-      { href: '/debts', label: 'Schulden', icon: CreditCard },
-      { href: '/expenses', label: 'Ausgaben', icon: Wallet },
-      { href: '/budget', label: 'Budgets', icon: Target },
-    ],
-  },
-  {
-    label: 'Vermögen',
-    items: [
-      { href: '/savings', label: 'Sparziele', icon: PiggyBank },
-      { href: '/accounts', label: 'Konten', icon: Landmark },
-      { href: '/freelance', label: 'Freelance', icon: CalendarDays },
-    ],
-  },
-  {
-    label: 'Berichte',
-    items: [
-      { href: '/monthly-report', label: 'Monatsbericht', icon: FileBarChart },
-      { href: '/annual-report', label: 'Jahresbericht', icon: FileBarChart },
-      { href: '/finance-score', label: 'Finanz-Score', icon: Shield },
-      { href: '/finance-goals', label: 'Finanz-Ziele', icon: Flag },
-    ],
-  },
-  {
-    label: 'Tools',
-    items: [
-      { href: '/bank-sync', label: 'Bank Sync', icon: RefreshCw },
-      { href: '/receipts', label: 'Belege', icon: Image },
-      { href: '/category-rules', label: 'Regeln', icon: Zap },
-      { href: '/activity-log', label: 'Aktivitäten', icon: Clock },
-    ],
-  },
-  {
-    label: 'System',
-    items: [
-      { href: '/settings', label: 'Einstellungen', icon: Settings },
-      { href: '/admin', label: 'Admin', icon: Crown, adminOnly: true },
-      { href: '/profile', label: 'Profil', icon: UserCircle },
-    ],
-  },
-];
-
-// Flat list for backward compat (page title lookup etc.)
-const allNavItems = navGroups.flatMap(g => g.items);
-
-const mobileTabItems: NavItem[] = [
-  { href: '/dashboard', label: 'Start', icon: LayoutDashboard },
-  { href: '/expenses', label: 'Ausgaben', icon: Wallet },
-  { href: '/budget', label: 'Budgets', icon: Target },
-  { href: '/accounts', label: 'Konten', icon: Landmark },
-];
-
-const GUIDED_MODE_HIDDEN_ITEMS = [
-  '/annual-report',
-  '/finance-score',
-  '/finance-goals',
-  '/category-rules',
-  '/activity-log',
-];
-
 export function AppLayout({ children }: { children: React.ReactNode }) {
   const [sidebarOpen, setSidebarOpen] = useState(true);
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
   const [monthPickerOpen, setMonthPickerOpen] = useState(false);
   const [onboardingOpen, setOnboardingOpen] = useState(false);
-  const [collapsedGroups, setCollapsedGroups] = useState<Set<string>>(new Set());
+  const [collapsedGroups, setCollapsedGroups] = useState<Set<string>>(() => getDefaultCollapsedLabels(APP_NAV_GROUPS));
   const { theme, setTheme, resolvedTheme } = useTheme();
   const { state, dispatch, isLoading } = useFinance();
   const pathname = usePathname();
+  const router = useRouter();
   const { data: session } = useSession();
   const isAdmin = (session?.user as { role?: string } | undefined)?.role === 'admin';
   const hiddenMenuItems = state.settings.hiddenMenuItems || [];
@@ -125,16 +49,11 @@ export function AppLayout({ children }: { children: React.ReactNode }) {
   const [shortcutsOpen, setShortcutsOpen] = useState(false);
   const [shortcutsHintOpen, setShortcutsHintOpen] = useState(false);
 
-  const effectiveHiddenMenuItems = (() => {
-    const items = new Set(hiddenMenuItems);
-    if (experienceMode === 'guided') {
-      GUIDED_MODE_HIDDEN_ITEMS.forEach((item) => items.add(item));
-    }
-    if (experienceProfile === 'personal') {
-      items.add('/freelance');
-    }
-    return items;
-  })();
+  const effectiveHiddenMenuItems = buildExperienceHiddenItemSet({
+    hiddenMenuItems,
+    mode: experienceMode,
+    profile: experienceProfile,
+  });
 
   const setupChecklist = [
     { label: 'Konto', done: state.accounts.length > 0 },
@@ -144,20 +63,14 @@ export function AppLayout({ children }: { children: React.ReactNode }) {
   const hasSetupData = setupChecklist.every((item) => item.done);
   const needsSetupBanner = !state.settings.userExperience.initialSetupCompleted && !isLoading;
 
-  // Filter nav groups based on admin role and hidden items
-  const visibleGroups = navGroups
-    .map(group => ({
-      ...group,
-      items: group.items.filter(item => {
-        if (item.adminOnly && !isAdmin) return false;
-        if (effectiveHiddenMenuItems.has(item.href)) return false;
-        return true;
-      }),
-    }))
-    .filter(group => group.items.length > 0);
-
-  const currentNavItem = allNavItems.find(item => pathname === item.href);
-  const isMobileMoreActive = mobileMenuOpen || !mobileTabItems.some((item) => pathname === item.href || pathname.startsWith(`${item.href}/`));
+  const visibleGroups = filterNavGroups(APP_NAV_GROUPS, {
+    hiddenItems: effectiveHiddenMenuItems,
+    isAdmin,
+  });
+  const footerNavItems = filterNavItems(APP_FOOTER_NAV_ITEMS, { isAdmin, ignoreHidden: true });
+  const allNavItems = [...APP_NAV_GROUPS.flatMap((group) => group.items), ...APP_FOOTER_NAV_ITEMS];
+  const currentNavItem = allNavItems.find((item) => isNavItemActive(pathname, item));
+  const isMobileMoreActive = mobileMenuOpen || !APP_MOBILE_NAV_ITEMS.some((item) => item.type === 'link' && isNavItemActive(pathname, item));
 
   const toggleGroup = (label: string) => {
     setCollapsedGroups(prev => {
@@ -315,6 +228,15 @@ export function AppLayout({ children }: { children: React.ReactNode }) {
     setMonthPickerOpen(false);
   };
 
+  const handleOpenQuickCapture = () => {
+    if (state.settings.quickEntry) {
+      window.dispatchEvent(new CustomEvent('open-quick-capture', { detail: { type: 'expense' } }));
+      return;
+    }
+
+    router.push('/expenses');
+  };
+
   return (
     <div className="app-shell flex h-screen bg-slate-50 dark:bg-gray-950 overflow-hidden">
       {/* SIDEBAR (Desktop) */}
@@ -340,7 +262,7 @@ export function AppLayout({ children }: { children: React.ReactNode }) {
         <nav className="flex-1 py-3 px-3 space-y-0.5 overflow-y-auto">
           {visibleGroups.map((group) => {
             const isCollapsed = collapsedGroups.has(group.label);
-            const hasActiveItem = group.items.some(item => pathname === item.href);
+            const hasActiveItem = group.items.some((item) => isNavItemActive(pathname, item));
             return (
               <div key={group.label}>
                 {sidebarOpen && (
@@ -354,7 +276,7 @@ export function AppLayout({ children }: { children: React.ReactNode }) {
                 )}
                 {(!isCollapsed || !sidebarOpen) && group.items.map((item) => {
                   const ItemIcon = item.icon;
-                  const isActive = pathname === item.href;
+                  const isActive = isNavItemActive(pathname, item);
                   return (
                     <Link
                       key={item.href}
@@ -372,7 +294,7 @@ export function AppLayout({ children }: { children: React.ReactNode }) {
                     </Link>
                   );
                 })}
-                {isCollapsed && sidebarOpen && hasActiveItem && group.items.filter(item => pathname === item.href).map(item => {
+                {isCollapsed && sidebarOpen && hasActiveItem && group.items.filter((item) => isNavItemActive(pathname, item)).map((item) => {
                   const ItemIcon = item.icon;
                   return (
                     <Link
@@ -391,6 +313,24 @@ export function AppLayout({ children }: { children: React.ReactNode }) {
         </nav>
 
         <div className="p-3 border-t border-slate-200 dark:border-gray-800 flex-shrink-0 space-y-1">
+          {footerNavItems.map((item) => {
+            const ItemIcon = item.icon;
+            const isActive = isNavItemActive(pathname, item);
+            return (
+              <Link
+                key={item.href}
+                href={item.href}
+                className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-xl transition-all duration-200 ${!sidebarOpen && 'justify-center'} ${
+                  isActive
+                    ? 'bg-blue-600 text-white shadow-md shadow-blue-600/25'
+                    : 'text-slate-600 dark:text-gray-400 hover:bg-slate-100 dark:hover:bg-gray-800 hover:text-slate-900 dark:hover:text-white'
+                }`}
+              >
+                <ItemIcon size={20} className="flex-shrink-0" />
+                {sidebarOpen && <span className="text-sm font-medium whitespace-nowrap">{item.label}</span>}
+              </Link>
+            );
+          })}
           <button
             onClick={cycleTheme}
             className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-xl text-slate-600 dark:text-gray-400 hover:bg-slate-100 dark:hover:bg-gray-800 transition-all duration-200 ${!sidebarOpen && 'justify-center'}`}
@@ -449,7 +389,7 @@ export function AppLayout({ children }: { children: React.ReactNode }) {
                   </p>
                   {group.items.map((item) => {
                     const ItemIcon = item.icon;
-                    const isActive = pathname === item.href;
+                    const isActive = isNavItemActive(pathname, item);
                     return (
                       <Link
                         key={item.href}
@@ -466,6 +406,25 @@ export function AppLayout({ children }: { children: React.ReactNode }) {
                   })}
                 </div>
               ))}
+              <div className="mt-4 border-t border-slate-200 pt-3 dark:border-gray-800">
+                {footerNavItems.map((item) => {
+                  const ItemIcon = item.icon;
+                  const isActive = isNavItemActive(pathname, item);
+                  return (
+                    <Link
+                      key={item.href}
+                      href={item.href}
+                      onClick={() => setMobileMenuOpen(false)}
+                      className={`w-full flex items-center gap-3 px-3 py-2 rounded-xl transition-all ${
+                        isActive ? 'bg-blue-600 text-white shadow-md' : 'text-slate-600 dark:text-gray-400 hover:bg-slate-100 dark:hover:bg-gray-800'
+                      }`}
+                    >
+                      <ItemIcon size={18} />
+                      <span className="text-sm font-medium">{item.label}</span>
+                    </Link>
+                  );
+                })}
+              </div>
               <button
                 onClick={() => signOut({ callbackUrl: '/login' })}
                 className="w-full flex items-center gap-3 px-3 py-2 mt-2 rounded-xl text-slate-600 dark:text-gray-400 hover:bg-red-50 dark:hover:bg-red-950/30 hover:text-red-600 transition-all"
@@ -560,9 +519,25 @@ export function AppLayout({ children }: { children: React.ReactNode }) {
 
       <nav className="lg:hidden fixed inset-x-0 bottom-0 z-40 border-t border-slate-200 bg-white/95 px-2 pb-[var(--safe-area-bottom)] pt-2 backdrop-blur-xl dark:border-gray-800 dark:bg-gray-900/95">
         <div className="grid grid-cols-5 gap-1">
-          {mobileTabItems.map((item) => {
+          {APP_MOBILE_NAV_ITEMS.map((item) => {
             const ItemIcon = item.icon;
-            const isActive = pathname === item.href || pathname.startsWith(`${item.href}/`);
+
+            if (item.type === 'action') {
+              return (
+                <button
+                  key={item.label}
+                  onClick={handleOpenQuickCapture}
+                  className="flex min-h-[3.5rem] flex-col items-center justify-center gap-1 rounded-2xl px-1 py-2 text-[11px] font-medium text-slate-700 transition-all dark:text-white"
+                >
+                  <span className="flex h-11 w-11 items-center justify-center rounded-full bg-blue-600 text-white shadow-lg shadow-blue-600/30">
+                    <ItemIcon size={18} />
+                  </span>
+                  <span>{item.label}</span>
+                </button>
+              );
+            }
+
+            const isActive = isNavItemActive(pathname, item);
             return (
               <Link
                 key={item.href}
@@ -647,7 +622,7 @@ export function AppLayout({ children }: { children: React.ReactNode }) {
         </div>
       </Modal>
 
-      {!isSettingsPage && <QuickCaptureFab />}
+      {!isSettingsPage && <QuickCaptureFab desktopOnly />}
       {!isSettingsPage && <BudgetFeedbackToast />}
       {shortcutsHintOpen && (
         <div className="fixed inset-x-4 bottom-[calc(6.75rem+var(--safe-area-bottom))] z-[90] mx-auto max-w-md rounded-3xl border border-slate-200 bg-white p-4 shadow-2xl dark:border-gray-800 dark:bg-gray-900 sm:left-auto sm:right-6 sm:mx-0 sm:w-[360px] sm:bottom-6">

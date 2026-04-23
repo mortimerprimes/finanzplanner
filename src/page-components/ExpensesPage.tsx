@@ -14,7 +14,7 @@ import {
   TriangleAlert,
 } from 'lucide-react';
 import { useFinance } from '@/lib/finance-context';
-import { Badge, Button, Card, EmptyState, Icon, Input, Modal, Select } from '../components/ui';
+import { Badge, Button, Card, EmptyState, Icon, Input, Modal, PageHeader, Select } from '../components/ui';
 import { analyzeReceiptWithAI, AIExpenseSuggestion, parseSpeechExpenses } from '../services/ai';
 import {
   calculateBudgetStatus,
@@ -92,6 +92,7 @@ export function ExpensesPage() {
   const [filterAccount, setFilterAccount] = useState('all');
   const [filterRecurring, setFilterRecurring] = useState('all');
   const [filtersOpen, setFiltersOpen] = useState(false);
+  const [captureHelpersOpen, setCaptureHelpersOpen] = useState(false);
   const [search, setSearch] = useState('');
   const [minAmount, setMinAmount] = useState('');
 
@@ -129,6 +130,7 @@ export function ExpensesPage() {
   const totalMonth = monthExpenses.reduce((sum, expense) => sum + expense.amount, 0);
 
   // Batch selection
+  const [selectionMode, setSelectionMode] = useState(false);
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const [batchCategory, setBatchCategory] = useState('');
   const toggleSelect = (id: string) => setSelectedIds(prev => {
@@ -167,9 +169,11 @@ export function ExpensesPage() {
     setFilterAccount('all');
     setFilterRecurring('all');
     setFiltersOpen(false);
+    setCaptureHelpersOpen(false);
     setMinAmount('');
     setMaxAmount('');
     setWarningsOnly(false);
+    setSelectionMode(false);
     setSelectedIds(new Set());
 
     if (expenseFocus.month) {
@@ -532,6 +536,32 @@ export function ExpensesPage() {
     warningsOnly,
   ].filter(Boolean).length;
 
+  const toggleSelectionMode = () => {
+    setSelectionMode((current) => {
+      if (current) {
+        setSelectedIds(new Set());
+        setBatchCategory('');
+      }
+      return !current;
+    });
+  };
+
+  useEffect(() => {
+    const openExpenseCreate = () => openModal();
+    const openExpenseFilters = () => setFiltersOpen(true);
+    const openExpenseHelpers = () => setCaptureHelpersOpen(true);
+
+    window.addEventListener('expenses-open-create', openExpenseCreate);
+    window.addEventListener('expenses-open-filters', openExpenseFilters);
+    window.addEventListener('expenses-open-helpers', openExpenseHelpers);
+
+    return () => {
+      window.removeEventListener('expenses-open-create', openExpenseCreate);
+      window.removeEventListener('expenses-open-filters', openExpenseFilters);
+      window.removeEventListener('expenses-open-helpers', openExpenseHelpers);
+    };
+  }, []);
+
   const renderSuggestionEditor = (
     suggestions: SuggestionDraft[],
     setSuggestions: React.Dispatch<React.SetStateAction<SuggestionDraft[]>>
@@ -612,15 +642,54 @@ export function ExpensesPage() {
 
   return (
     <div className="space-y-6 animate-fade-in">
-      <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-        <div>
-          <h2 className="text-lg font-bold text-gray-900 dark:text-white">Ausgaben: {formatCurrency(totalMonth, settings)}</h2>
-          <p className="text-sm text-slate-500 dark:text-gray-500">{monthExpenses.length} Buchungen in {filterMonth}</p>
-        </div>
-        <Button onClick={() => openModal()} icon="Plus">Ausgabe erfassen</Button>
-      </div>
+      <PageHeader
+        eyebrow="Erfassen"
+        title="Ausgaben"
+        description={`${monthExpenses.length} Buchungen in ${filterMonth} · ${formatCurrency(totalMonth, settings)} insgesamt.`}
+        actions={(
+          <>
+            <Button onClick={() => openModal()} icon="Plus">Ausgabe erfassen</Button>
+            <Button variant="secondary" icon="SlidersHorizontal" onClick={() => setFiltersOpen((value) => !value)}>
+              {activeFilterCount > 0 ? `Filter (${activeFilterCount})` : 'Filter'}
+            </Button>
+            <Button variant="secondary" icon="Sparkles" onClick={() => setCaptureHelpersOpen((value) => !value)}>
+              Erfassungshelfer
+            </Button>
+          </>
+        )}
+        secondary={(
+          <div className="flex flex-wrap items-center gap-2">
+            {activeFilterCount > 0 && <Badge color="#2563eb">{activeFilterCount} Filter aktiv</Badge>}
+            {selectionMode && <Badge color="#8b5cf6">Auswahlmodus aktiv</Badge>}
+            {captureHelpersOpen && <Badge color="#0f766e">Erfassungshelfer geöffnet</Badge>}
+            <span className="rounded-full bg-slate-100 px-3 py-1.5 text-xs text-slate-500 dark:bg-gray-800 dark:text-gray-400">Normale Erfassung bleibt im Fokus, Hilfen und Filter nur bei Bedarf.</span>
+          </div>
+        )}
+      />
 
-      
+      {captureHelpersOpen && (
+        <Card className="p-5">
+          <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
+            <div>
+              <h3 className="text-sm font-semibold text-gray-900 dark:text-white">Zusatzfunktionen für Erfassung und Prüfung</h3>
+              <p className="mt-1 text-sm text-slate-500 dark:text-gray-500">
+                Öffne Beleg- und Spracheingabe nur bei Bedarf und halte die normale Buchungsansicht ansonsten schlank.
+              </p>
+            </div>
+            <div className="grid grid-cols-1 gap-2 sm:grid-cols-3 lg:min-w-[540px]">
+              <Button variant="secondary" icon="ReceiptText" onClick={() => setReceiptModalOpen(true)}>
+                Beleg mit AI
+              </Button>
+              <Button variant="secondary" icon="Mic" onClick={() => setVoiceModalOpen(true)}>
+                Spracheingabe
+              </Button>
+              <Button variant={selectionMode ? 'primary' : 'secondary'} icon="Check" onClick={toggleSelectionMode}>
+                {selectionMode ? 'Auswahlmodus beenden' : 'Auswahlmodus starten'}
+              </Button>
+            </div>
+          </div>
+        </Card>
+      )}
 
       {categoryBreakdown.length > 0 && (
         <div className="flex gap-2 overflow-x-auto px-1 pb-1">
@@ -735,22 +804,30 @@ export function ExpensesPage() {
         </Card>
       ) : (
         <div className="space-y-5">
-          {/* Batch action bar */}
-          {selectedIds.size > 0 && (
+          {selectionMode && (
             <Card className="flex flex-wrap items-center gap-3 bg-blue-50 p-3 dark:bg-blue-950/20">
-              <span className="text-sm font-semibold text-blue-700 dark:text-blue-300">{selectedIds.size} ausgewählt</span>
-              <Select value={batchCategory} onChange={setBatchCategory} options={[{ value: '', label: 'Kategorie ändern...' }, ...categoryOptions]} />
-              {batchCategory && (
-                <Button size="sm" onClick={handleBatchCategoryChange}>Anwenden</Button>
+              <span className="text-sm font-semibold text-blue-700 dark:text-blue-300">
+                {selectedIds.size > 0 ? `${selectedIds.size} ausgewählt` : 'Auswahlmodus aktiv'}
+              </span>
+              {filteredExpenses.length > 3 && (
+                <button onClick={toggleSelectAll} className="text-xs font-medium text-blue-600 hover:text-blue-800 dark:text-blue-400">
+                  {selectedIds.size === filteredExpenses.length ? 'Alle abwählen' : 'Alle auswählen'}
+                </button>
               )}
-              <Button size="sm" variant="danger" onClick={handleBatchDelete}>Löschen</Button>
-              <button onClick={() => setSelectedIds(new Set())} className="ml-auto text-xs text-slate-500 hover:text-slate-700 dark:text-gray-400">Auswahl aufheben</button>
+              {selectedIds.size > 0 && (
+                <>
+                  <Select value={batchCategory} onChange={setBatchCategory} options={[{ value: '', label: 'Kategorie ändern...' }, ...categoryOptions]} />
+                  {batchCategory && (
+                    <Button size="sm" onClick={handleBatchCategoryChange}>Anwenden</Button>
+                  )}
+                  <Button size="sm" variant="danger" onClick={handleBatchDelete}>Löschen</Button>
+                  <button onClick={() => setSelectedIds(new Set())} className="text-xs text-slate-500 hover:text-slate-700 dark:text-gray-400">Auswahl aufheben</button>
+                </>
+              )}
+              <button onClick={toggleSelectionMode} className="ml-auto text-xs font-medium text-slate-500 hover:text-slate-700 dark:text-gray-400">
+                Auswahlmodus beenden
+              </button>
             </Card>
-          )}
-          {filteredExpenses.length > 3 && (
-            <button onClick={toggleSelectAll} className="text-xs font-medium text-blue-600 hover:text-blue-800 dark:text-blue-400">
-              {selectedIds.size === filteredExpenses.length ? 'Alle abwählen' : 'Alle auswählen'}
-            </button>
           )}
           {Object.entries(groupedByDate).map(([dateKey, items]) => {
             const dayTotal = items.reduce((sum, expense) => sum + expense.amount, 0);
@@ -773,12 +850,14 @@ export function ExpensesPage() {
                       >
                         <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
                           <div className="flex min-w-0 items-start gap-3">
-                            <input
-                              type="checkbox"
-                              checked={selectedIds.has(expense.id)}
-                              onChange={() => toggleSelect(expense.id)}
-                              className="mt-2 h-4 w-4 flex-shrink-0 rounded border-slate-300 text-blue-600 focus:ring-blue-500"
-                            />
+                            {selectionMode && (
+                              <input
+                                type="checkbox"
+                                checked={selectedIds.has(expense.id)}
+                                onChange={() => toggleSelect(expense.id)}
+                                className="mt-2 h-4 w-4 flex-shrink-0 rounded border-slate-300 text-blue-600 focus:ring-blue-500"
+                              />
+                            )}
                             <div className="rounded-xl p-2" style={{ backgroundColor: `${categoryInfo.color}15` }}>
                               <Icon name={categoryInfo.icon} size={16} color={categoryInfo.color} />
                             </div>

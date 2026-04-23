@@ -1,9 +1,11 @@
-import { ChangeEvent, useMemo, useState } from 'react';
+import { ChangeEvent, useEffect, useMemo, useRef, useState } from 'react';
+import { useSearchParams } from 'next/navigation';
 import { BrainCircuit, CheckCircle2, FileSpreadsheet, Pencil, Sparkles, Trash2, Upload, WalletCards } from 'lucide-react';
 import { useFinance } from '@/lib/finance-context';
-import { Card, Button, Input, Modal, Select, EmptyState, Icon, Badge } from '../components/ui';
+import { Card, Button, Input, Modal, Select, EmptyState, Icon, Badge, PageHeader } from '../components/ui';
 import { ACCOUNT_TYPES, INCOME_TYPES, UI_COLORS } from '../utils/constants';
 import { calculateNetWorth, formatCurrency, getExpenseCategoryMap } from '../utils/helpers';
+import { focusElementById, getSearchFocus } from '../utils/searchFocus';
 import { categorizeBankTransactionsWithAI } from '../services/ai';
 import {
   collectImportedTransactionFingerprints,
@@ -42,11 +44,16 @@ interface BankImportDraft {
 export function AccountsPage() {
   const { state, dispatch } = useFinance();
   const { accounts, debts, transfers, settings, expenses, incomes, accountRules, categoryRules, fixedExpenses } = state;
+  const searchParams = useSearchParams();
+  const transferFocus = getSearchFocus(searchParams, 'transfer');
+  const transferFocusRef = useRef('');
 
+  const [accountToolsOpen, setAccountToolsOpen] = useState(false);
   const [accountModalOpen, setAccountModalOpen] = useState(false);
   const [transferModalOpen, setTransferModalOpen] = useState(false);
   const [importModalOpen, setImportModalOpen] = useState(false);
   const [editingAccount, setEditingAccount] = useState<Account | null>(null);
+  const [highlightedTransferId, setHighlightedTransferId] = useState<string | null>(null);
 
   const [name, setName] = useState('');
   const [balance, setBalance] = useState('');
@@ -105,6 +112,15 @@ export function AccountsPage() {
   const existingImportFingerprints = useMemo(() => {
     return collectImportedTransactionFingerprints(expenses, incomes);
   }, [expenses, incomes]);
+  const visibleTransfers = useMemo(() => {
+    const recentTransfers = transfers.slice(-4).reverse();
+    if (!transferFocus?.id) return recentTransfers;
+
+    const focusedTransfer = transfers.find((transfer) => transfer.id === transferFocus.id);
+    if (!focusedTransfer) return recentTransfers;
+
+    return [focusedTransfer, ...recentTransfers.filter((transfer) => transfer.id !== focusedTransfer.id)].slice(0, 5);
+  }, [transferFocus?.id, transfers]);
 
   const mapTransactionsToDrafts = (transactions: SyncTransaction[], defaultAccountId: string) => {
     return transactions.map((transaction) => mapImportTransactionToDraft(transaction, {
@@ -224,6 +240,52 @@ export function AccountsPage() {
     setImportDrafts(mapTransactionsToDrafts(parsedTransactions, importAccountId));
     setImportError('');
   };
+
+  useEffect(() => {
+    const openAccountCreate = () => openAccountModal();
+    const openAccountTools = () => setAccountToolsOpen(true);
+    const openAccountTransfer = () => {
+      setAccountToolsOpen(true);
+      setTransferModalOpen(true);
+    };
+    const openAccountImport = () => {
+      setAccountToolsOpen(true);
+      setImportModalOpen(true);
+    };
+
+    window.addEventListener('accounts-open-create', openAccountCreate);
+    window.addEventListener('accounts-open-tools', openAccountTools);
+    window.addEventListener('accounts-open-transfer', openAccountTransfer);
+    window.addEventListener('accounts-open-import', openAccountImport);
+
+    return () => {
+      window.removeEventListener('accounts-open-create', openAccountCreate);
+      window.removeEventListener('accounts-open-tools', openAccountTools);
+      window.removeEventListener('accounts-open-transfer', openAccountTransfer);
+      window.removeEventListener('accounts-open-import', openAccountImport);
+    };
+  }, []);
+
+  useEffect(() => {
+    if (!transferFocus?.id) return;
+    if (transferFocusRef.current === transferFocus.id) return;
+
+    let clearHighlightTimeout: number | undefined;
+    const cleanupFocus = focusElementById(`transfer-${transferFocus.id}`, () => {
+      transferFocusRef.current = transferFocus.id;
+      setHighlightedTransferId(transferFocus.id);
+      clearHighlightTimeout = window.setTimeout(() => {
+        setHighlightedTransferId((current) => current === transferFocus.id ? null : current);
+      }, 2600);
+    });
+
+    return () => {
+      cleanupFocus();
+      if (clearHighlightTimeout) {
+        window.clearTimeout(clearHighlightTimeout);
+      }
+    };
+  }, [transferFocus?.id, visibleTransfers]);
 
   const handleImportFile = async (event: ChangeEvent<HTMLInputElement>) => {
     const file = event.target.files?.[0];
@@ -370,17 +432,48 @@ export function AccountsPage() {
 
   return (
     <div className="space-y-6 animate-fade-in">
-      <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-        <div>
-          <h2 className="text-lg font-bold text-gray-900 dark:text-white">Konten & Nettovermögen</h2>
-          <p className="text-sm text-slate-500 dark:text-gray-500">Verwalte Konten, Assets und interne Umbuchungen wie in Premium-Apps</p>
-        </div>
-        <div className="flex flex-wrap gap-2">
-          <Button variant="secondary" onClick={() => setImportModalOpen(true)} icon="Upload">Kontoauszug importieren</Button>
-          <Button variant="secondary" onClick={() => setTransferModalOpen(true)} icon="ArrowRightLeft">Transfer</Button>
-          <Button onClick={() => openAccountModal()} icon="Plus">Konto hinzufügen</Button>
-        </div>
-      </div>
+      <PageHeader
+        eyebrow="Vermoegen"
+        title="Konten & Nettovermögen"
+        description="Verwalte Konten, Assets und interne Umbuchungen, ohne Import und Spezialwerkzeuge ständig im Vordergrund zu haben."
+        actions={(
+          <>
+            <Button onClick={() => openAccountModal()} icon="Plus">Konto hinzufügen</Button>
+            <Button variant="secondary" icon="Sparkles" onClick={() => setAccountToolsOpen((value) => !value)}>
+              Werkzeuge
+            </Button>
+          </>
+        )}
+        secondary={(
+          <div className="flex flex-wrap items-center gap-2">
+            <Badge color="#2563eb">{accounts.length} Konten</Badge>
+            {transfers.length > 0 && <Badge color="#0f766e">{transfers.length} Umbuchungen</Badge>}
+            <Badge color={netWorth >= 0 ? '#10b981' : '#ef4444'}>Nettovermögen: {formatCurrency(netWorth, settings)}</Badge>
+            <span className="rounded-full bg-slate-100 px-3 py-1.5 text-xs text-slate-500 dark:bg-gray-800 dark:text-gray-400">Transfers und Importe liegen im Werkzeugbereich, die Kontoübersicht bleibt die Hauptfläche.</span>
+          </div>
+        )}
+      />
+
+      {accountToolsOpen && (
+        <Card className="p-5">
+          <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
+            <div>
+              <h3 className="text-sm font-semibold text-gray-900 dark:text-white">Werkzeuge für Transfers und Kontoauszüge</h3>
+              <p className="mt-1 text-sm text-slate-500 dark:text-gray-500">
+                Öffne Transfers und Import nur bei Bedarf und halte die Kontoübersicht als Hauptarbeitsfläche sauber.
+              </p>
+            </div>
+            <div className="grid grid-cols-1 gap-2 sm:grid-cols-2 lg:min-w-[420px]">
+              <Button variant="secondary" icon="ArrowRightLeft" onClick={() => setTransferModalOpen(true)}>
+                Transfer
+              </Button>
+              <Button variant="secondary" icon="Upload" onClick={() => setImportModalOpen(true)}>
+                Kontoauszug importieren
+              </Button>
+            </div>
+          </div>
+        </Card>
+      )}
 
       <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
         <Card className="p-5">
@@ -502,11 +595,15 @@ export function AccountsPage() {
           <div className="mt-5 border-t border-slate-200 pt-4 dark:border-gray-800">
             <h4 className="mb-3 text-sm font-semibold text-gray-900 dark:text-white">Letzte Transfers</h4>
             <div className="space-y-2">
-              {transfers.slice(-4).reverse().map((transfer) => {
+              {visibleTransfers.map((transfer) => {
                 const from = accounts.find((account) => account.id === transfer.fromAccountId);
                 const to = accounts.find((account) => account.id === transfer.toAccountId);
                 return (
-                  <div key={transfer.id} className="flex items-center justify-between gap-3 rounded-xl bg-slate-50 px-3 py-2 dark:bg-gray-800/50">
+                  <div
+                    key={transfer.id}
+                    id={`transfer-${transfer.id}`}
+                    className={`flex items-center justify-between gap-3 rounded-xl bg-slate-50 px-3 py-2 transition-all dark:bg-gray-800/50 ${highlightedTransferId === transfer.id ? 'ring-2 ring-blue-300 dark:ring-blue-700' : ''}`}
+                  >
                     <div className="min-w-0">
                       <p className="truncate text-sm font-medium text-gray-900 dark:text-white">{from?.name || 'Quelle'} → {to?.name || 'Ziel'}</p>
                       <p className="text-xs text-slate-500 dark:text-gray-500">{transfer.date}{transfer.note ? ` · ${transfer.note}` : ''}</p>
@@ -520,20 +617,6 @@ export function AccountsPage() {
           </div>
         </Card>
       </div>
-
-      <Card className="p-5">
-        <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-          <div>
-            <h3 className="text-base font-semibold text-gray-900 dark:text-white">Kontoauszug-Import mit AI</h3>
-            <p className="text-sm text-slate-500 dark:text-gray-500">CSV von der Bank hochladen, automatisch kategorisieren und vor dem Import prüfen.</p>
-          </div>
-          <div className="flex flex-wrap gap-2">
-            <Badge color="#3b82f6">CSV-Import</Badge>
-            <Badge color="#8b5cf6">AI-Kategorisierung</Badge>
-            <Badge color="#10b981">Vorschau vor Import</Badge>
-          </div>
-        </div>
-      </Card>
 
       <Modal isOpen={accountModalOpen} onClose={closeAccountModal} title={editingAccount ? 'Konto bearbeiten' : 'Neues Konto'}>
         <div className="space-y-4">

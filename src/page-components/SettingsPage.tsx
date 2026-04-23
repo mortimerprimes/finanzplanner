@@ -7,9 +7,10 @@ import jsPDF from 'jspdf';
 import autoTable from 'jspdf-autotable';
 import { useFinance } from '@/lib/finance-context';
 import { useTheme } from '../hooks/useTheme';
-import { Badge, Button, Card, Icon, Input, Select, Toggle } from '../components/ui';
+import { Badge, Button, Card, Icon, Input, PageHeader, Select, Toggle } from '../components/ui';
 import { HelpTooltip } from '../components/HelpTooltip';
 import { AI_ENDPOINT_PRESETS, AI_PROVIDER_DEFAULTS, AI_PROVIDER_OPTIONS, CURRENCIES, DASHBOARD_WIDGET_OPTIONS, DEFAULT_SETTINGS, UI_COLORS } from '../utils/constants';
+import { APP_NAV_GROUPS } from '../utils/appNavigation';
 import { fetchAvailableModels, testAIConnection } from '../services/ai';
 import {
   calculateMonthSummary,
@@ -73,6 +74,8 @@ function SettingSwitch({
   );
 }
 
+type SettingsSection = 'basics' | 'workspace' | 'automation' | 'data';
+
 export function SettingsPage() {
   const { state, dispatch } = useFinance();
   const { settings, selectedMonth } = state;
@@ -87,7 +90,7 @@ export function SettingsPage() {
   const [aiStatusTone, setAIStatusTone] = useState<'success' | 'error'>('success');
   const [aiTesting, setAITesting] = useState(false);
   const [showApiKey, setShowApiKey] = useState(false);
-  const [settingsSection, setSettingsSection] = useState<'basics' | 'workspace' | 'automation' | 'data'>('basics');
+  const [settingsSection, setSettingsSection] = useState<SettingsSection>('basics');
   const [browserNotificationPermission, setBrowserNotificationPermission] = useState<NotificationPermission | 'unsupported'>('unsupported');
 
   const flash = (message: string) => {
@@ -108,6 +111,18 @@ export function SettingsPage() {
     refreshNotificationPermission();
     window.addEventListener('focus', refreshNotificationPermission);
     return () => window.removeEventListener('focus', refreshNotificationPermission);
+  }, []);
+
+  useEffect(() => {
+    const openSettingsSection = (event: Event) => {
+      const detail = (event as CustomEvent<{ section?: SettingsSection }>).detail;
+      if (detail?.section) {
+        setSettingsSection(detail.section);
+      }
+    };
+
+    window.addEventListener('settings-open-section', openSettingsSection as EventListener);
+    return () => window.removeEventListener('settings-open-section', openSettingsSection as EventListener);
   }, []);
 
   const updateSetting = <K extends keyof Settings>(key: K, value: Settings[K]) => {
@@ -496,24 +511,84 @@ export function SettingsPage() {
     updateSetting('customExpenseCategories', settings.customExpenseCategories.filter((item) => item.id !== id));
   };
 
+  const isGuidedMode = settings.userExperience.mode === 'guided';
+  const currentModeLabel = settings.userExperience.mode === 'guided'
+    ? 'Gefuehrt'
+    : settings.userExperience.mode === 'standard'
+      ? 'Standard'
+      : 'Power';
+  const currentProfileLabel = settings.userExperience.profile === 'personal'
+    ? 'Privat'
+    : settings.userExperience.profile === 'freelance'
+      ? 'Freelance'
+      : 'Komplett';
+  const hiddenMenuCount = (settings.hiddenMenuItems || []).length;
+  const activeAutomationCount = [
+    ...Object.values(settings.notifications),
+    settings.ai.enabled,
+    (settings.emailReportFrequency || 'none') !== 'none',
+  ].filter(Boolean).length;
+  const settingsTabs = [
+    { id: 'basics', label: 'Alltag' },
+    { id: 'workspace', label: 'Oberflaeche' },
+    { id: 'automation', label: 'Automationen' },
+    { id: 'data', label: 'Daten' },
+  ] as const;
+  const quickAccessCards = [
+    {
+      id: 'basics',
+      title: 'Alltag',
+      value: `${currentModeLabel} · ${currentProfileLabel}`,
+      hint: settings.userExperience.initialSetupCompleted ? 'Setup abgeschlossen' : 'Setup noch offen',
+    },
+    {
+      id: 'workspace',
+      title: 'Oberflaeche',
+      value: `${settings.dashboardWidgets.length} Dashboard-Bausteine`,
+      hint: hiddenMenuCount > 0 ? `${hiddenMenuCount} Menuepunkte ausgeblendet` : 'Navigation komplett sichtbar',
+    },
+    {
+      id: 'automation',
+      title: 'Automationen',
+      value: `${activeAutomationCount} aktiv`,
+      hint: settings.ai.enabled ? 'AI und Erinnerungen konfiguriert' : 'Erinnerungen und optionale AI',
+    },
+    {
+      id: 'data',
+      title: 'Daten',
+      value: `${state.expenses.length + state.accounts.length + state.budgetLimits.length} Datensaetze`,
+      hint: 'Export, Import und Reset',
+    },
+  ] as const;
+
   const providerLabel = 'Vercel KV';
 
   return (
     <div className="max-w-6xl space-y-6 animate-fade-in">
-      <div className="flex flex-col gap-2 sm:flex-row sm:items-end sm:justify-between">
-        <div>
-          <h2 className="text-lg font-bold text-gray-900 dark:text-white">Einstellungen & Backup-Center</h2>
-          <p className="text-sm text-slate-500 dark:text-gray-500">Dashboard personalisieren, Exporte steuern und Premium-Workflows anpassen</p>
-        </div>
-        <div className="inline-flex items-center gap-2 rounded-2xl border border-slate-200 bg-white px-4 py-2 text-sm dark:border-gray-800 dark:bg-gray-900">
-          <ShieldCheck size={16} className="text-emerald-500" />
-          <span className="font-medium text-gray-900 dark:text-white">{providerLabel} als Backup-Ziel</span>
-        </div>
-      </div>
-
-      <div className="rounded-2xl border border-blue-200 bg-blue-50/80 px-4 py-3 text-sm text-blue-900 dark:border-blue-900/60 dark:bg-blue-950/20 dark:text-blue-100">
-        Deine App-Konfiguration wird automatisch gespeichert: Theme, Widgets, Navigation, AI-Provider, API-Key, Backup-Ziele und weitere Einstellungen werden deinem Konto zugeordnet und zusätzlich lokal auf diesem Gerät zwischengespeichert.
-      </div>
+      <PageHeader
+        eyebrow="Steuerung"
+        title="Einstellungen & Backup-Center"
+        description="Alltag, Oberfläche, Automationen und Daten an einer Stelle steuern, ohne dass wichtige Präferenzen im Funktionslager verschwinden."
+        badges={(
+          <>
+            <Badge color="#2563eb">Modus: {currentModeLabel}</Badge>
+            <Badge color="#0f766e">Profil: {currentProfileLabel}</Badge>
+            {isGuidedMode && <Badge color="#8b5cf6">Vereinfachte Ansicht aktiv</Badge>}
+          </>
+        )}
+        aside={(
+          <div className="inline-flex items-center gap-2 rounded-2xl border border-slate-200 bg-white px-4 py-2 text-sm dark:border-gray-800 dark:bg-gray-900">
+            <ShieldCheck size={16} className="text-emerald-500" />
+            <span className="font-medium text-gray-900 dark:text-white">{providerLabel} als Backup-Ziel</span>
+          </div>
+        )}
+        secondary={(
+          <div className="flex flex-wrap gap-2 text-xs text-slate-500 dark:text-gray-500">
+            <span className="rounded-full bg-blue-50 px-3 py-1.5 text-blue-700 dark:bg-blue-950/30 dark:text-blue-300">Konfiguration wird automatisch gespeichert und diesem Konto zugeordnet.</span>
+            <span className="rounded-full bg-slate-100 px-3 py-1.5 dark:bg-gray-800">Widgets, Navigation, AI und Backups lassen sich hier zentral pflegen.</span>
+          </div>
+        )}
+      />
 
       {showSuccess && (
         <div className="flex items-center gap-2 rounded-2xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm font-medium text-emerald-700 dark:border-emerald-900 dark:bg-emerald-950/30 dark:text-emerald-400">
@@ -522,17 +597,41 @@ export function SettingsPage() {
         </div>
       )}
 
+      <Card className="p-5">
+        <div className="flex flex-col gap-5 xl:flex-row xl:items-start xl:justify-between">
+          <div>
+            <h3 className="text-lg font-semibold text-gray-900 dark:text-white">Schnellzugriff auf die wichtigsten Einstellungen</h3>
+            <p className="mt-1 max-w-2xl text-sm text-slate-500 dark:text-gray-500">
+              Nutze Alltag fuer Bedienung und Hinweise, Oberflaeche fuer Navigation und Dashboard, Automationen fuer Erinnerungen und AI, Daten fuer Export und Backups.
+            </p>
+          </div>
+          <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 xl:min-w-[520px] xl:grid-cols-4">
+            {quickAccessCards.map((item) => (
+              <button
+                key={item.id}
+                type="button"
+                onClick={() => setSettingsSection(item.id)}
+                className={`rounded-2xl border p-4 text-left transition-all ${
+                  settingsSection === item.id
+                    ? 'border-blue-300 bg-blue-50 dark:border-blue-700 dark:bg-blue-950/30'
+                    : 'border-slate-200 bg-white hover:border-slate-300 hover:bg-slate-50 dark:border-gray-800 dark:bg-gray-900 dark:hover:border-gray-700 dark:hover:bg-gray-800'
+                }`}
+              >
+                <p className="text-xs font-semibold uppercase tracking-[0.16em] text-slate-400 dark:text-gray-500">{item.title}</p>
+                <p className="mt-2 text-sm font-semibold text-gray-900 dark:text-white">{item.value}</p>
+                <p className="mt-1 text-xs text-slate-500 dark:text-gray-500">{item.hint}</p>
+              </button>
+            ))}
+          </div>
+        </div>
+      </Card>
+
       <div className="flex flex-wrap gap-2">
-        {[
-          { id: 'basics', label: 'Basis' },
-          { id: 'workspace', label: 'Personalisierung' },
-          { id: 'automation', label: 'Automatisierung' },
-          { id: 'data', label: 'Daten & Export' },
-        ].map((item) => (
+        {settingsTabs.map((item) => (
           <button
             key={item.id}
             type="button"
-            onClick={() => setSettingsSection(item.id as typeof settingsSection)}
+            onClick={() => setSettingsSection(item.id)}
             className={`rounded-full px-4 py-2 text-sm font-semibold transition-colors ${
               settingsSection === item.id
                 ? 'bg-slate-900 text-white dark:bg-white dark:text-gray-900'
@@ -700,7 +799,22 @@ export function SettingsPage() {
       </div>
       )}
 
-      {settingsSection === 'basics' && (
+      {settingsSection === 'workspace' && (
+      <>
+      {isGuidedMode && (
+      <Card className="p-5">
+        <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+          <div>
+            <h3 className="text-sm font-semibold text-gray-900 dark:text-white">Oberfläche im geführten Modus</h3>
+            <p className="mt-1 text-sm text-slate-500 dark:text-gray-500">
+              Passe zuerst Dashboard und Navigation an. Eigene Kategorien sind eher ein späterer Schritt und bleiben deshalb bewusst darunter einsortiert.
+            </p>
+          </div>
+          <Badge color="#8b5cf6">Einfachere UI aktiv</Badge>
+        </div>
+      </Card>
+      )}
+
       <Card className="p-5">
         <h3 className="mb-4 flex items-center gap-2 text-sm font-bold text-gray-900 dark:text-white">
           <Menu size={16} className="text-indigo-500" /> Menü-Sichtbarkeit
@@ -714,58 +828,14 @@ export function SettingsPage() {
           Blende Menüpunkte aus, die du nicht brauchst, um die Navigation übersichtlicher zu gestalten. Dashboard und Einstellungen bleiben immer sichtbar.
         </p>
         <div className="space-y-4">
-          {[
-            {
-              group: 'Übersicht',
-              items: [
-                { href: '/analytics', label: 'Analysen' },
-                { href: '/cashflow', label: 'Cashflow' },
-              ],
-            },
-            {
-              group: 'Finanzen',
-              items: [
-                { href: '/income', label: 'Einnahmen' },
-                { href: '/fixed-expenses', label: 'Fixkosten' },
-                { href: '/debts', label: 'Schulden' },
-                { href: '/expenses', label: 'Ausgaben' },
-                { href: '/budget', label: 'Budgets' },
-              ],
-            },
-            {
-              group: 'Vermögen',
-              items: [
-                { href: '/savings', label: 'Sparziele' },
-                { href: '/accounts', label: 'Konten' },
-                { href: '/freelance', label: 'Freelance' },
-              ],
-            },
-            {
-              group: 'Berichte',
-              items: [
-                { href: '/monthly-report', label: 'Monatsbericht' },
-                { href: '/annual-report', label: 'Jahresbericht' },
-                { href: '/finance-score', label: 'Finanz-Score' },
-                { href: '/finance-goals', label: 'Finanz-Ziele' },
-              ],
-            },
-            {
-              group: 'Tools',
-              items: [
-                { href: '/bank-sync', label: 'Bank Sync' },
-                { href: '/receipts', label: 'Belege' },
-                { href: '/category-rules', label: 'Regeln' },
-                { href: '/activity-log', label: 'Aktivitäten' },
-              ],
-            },
-          ].map((section) => {
+          {APP_NAV_GROUPS.map((section) => {
             const hiddenItems = settings.hiddenMenuItems || [];
             const allHidden = section.items.every(item => hiddenItems.includes(item.href));
             const noneHidden = section.items.every(item => !hiddenItems.includes(item.href));
             return (
-              <div key={section.group} className="rounded-2xl border border-slate-200 p-4 dark:border-gray-800">
+              <div key={section.label} className="rounded-2xl border border-slate-200 p-4 dark:border-gray-800">
                 <div className="flex items-center justify-between mb-3">
-                  <p className="text-sm font-semibold text-gray-900 dark:text-white">{section.group}</p>
+                  <p className="text-sm font-semibold text-gray-900 dark:text-white">{section.label}</p>
                   <button
                     onClick={() => {
                       if (noneHidden) {
@@ -807,6 +877,9 @@ export function SettingsPage() {
             );
           })}
         </div>
+        <p className="mt-4 text-xs text-slate-500 dark:text-gray-500">
+          Einstellungen, Profil und Admin bleiben bewusst immer erreichbar und werden nicht ausgeblendet.
+        </p>
         {(settings.hiddenMenuItems || []).length > 0 && (
           <button
             onClick={() => updateSetting('hiddenMenuItems', [])}
@@ -816,9 +889,31 @@ export function SettingsPage() {
           </button>
         )}
       </Card>
+      </>
       )}
 
       {settingsSection === 'automation' && (
+      <>
+      {isGuidedMode && (
+      <Card className="p-5">
+        <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+          <div>
+            <h3 className="text-sm font-semibold text-gray-900 dark:text-white">Geführter Modus für Automationen</h3>
+            <p className="mt-1 text-sm text-slate-500 dark:text-gray-500">
+              Im geführten Modus stehen hier zuerst Erinnerungen und System-Benachrichtigungen im Fokus. Erweiterte AI-Konfigurationen blendet die App bewusst aus.
+            </p>
+          </div>
+          <Button
+            variant="secondary"
+            onClick={() => updateSetting('userExperience', { ...settings.userExperience, mode: 'standard' })}
+          >
+            Zu Standard wechseln
+          </Button>
+        </div>
+      </Card>
+      )}
+
+      {!isGuidedMode && (
       <Card className="p-5">
         <h3 className="mb-4 flex items-center gap-2 text-sm font-bold text-gray-900 dark:text-white">
           <Bot size={16} className="text-fuchsia-500" /> AI-Schnittstelle für Belege & Sprache
@@ -1024,6 +1119,8 @@ export function SettingsPage() {
           </div>
         </div>
       </Card>
+      )}
+      </>
       )}
 
       {settingsSection === 'workspace' && (

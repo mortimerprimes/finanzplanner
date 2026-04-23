@@ -156,6 +156,57 @@ export function Button({
   );
 }
 
+/* ====== PAGE HEADER ====== */
+interface PageHeaderProps {
+  title: string;
+  description?: string;
+  eyebrow?: string;
+  badges?: React.ReactNode;
+  actions?: React.ReactNode;
+  aside?: React.ReactNode;
+  secondary?: React.ReactNode;
+  className?: string;
+}
+
+export function PageHeader({
+  title,
+  description,
+  eyebrow,
+  badges,
+  actions,
+  aside,
+  secondary,
+  className = '',
+}: PageHeaderProps) {
+  return (
+    <Card className={`p-5 sm:p-6 ${className}`}>
+      <div className="flex flex-col gap-4 xl:flex-row xl:items-start xl:justify-between">
+        <div className="min-w-0 flex-1">
+          {eyebrow && (
+            <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-slate-400 dark:text-gray-500">{eyebrow}</p>
+          )}
+          {badges && <div className="mt-3 flex flex-wrap items-center gap-2">{badges}</div>}
+          <h2 className="mt-3 text-xl font-bold tracking-tight text-gray-900 dark:text-white sm:text-2xl">{title}</h2>
+          {description && (
+            <p className="mt-2 max-w-3xl text-sm leading-6 text-slate-500 dark:text-gray-500">{description}</p>
+          )}
+        </div>
+        {(actions || aside) && (
+          <div className="flex w-full flex-col gap-3 xl:w-auto xl:min-w-[240px] xl:items-end">
+            {aside && <div className="w-full xl:w-auto">{aside}</div>}
+            {actions && <div className="flex flex-col gap-2 sm:flex-row sm:flex-wrap xl:justify-end">{actions}</div>}
+          </div>
+        )}
+      </div>
+      {secondary && (
+        <div className="mt-5 border-t border-slate-200 pt-4 dark:border-gray-800">
+          {secondary}
+        </div>
+      )}
+    </Card>
+  );
+}
+
 /* ====== TOGGLE ====== */
 interface ToggleProps {
   checked: boolean;

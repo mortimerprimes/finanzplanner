@@ -1,10 +1,10 @@
-import { ReactNode, useState } from 'react';
+import { ReactNode, useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { ArrowDownRight, ArrowUpRight, ExternalLink } from 'lucide-react';
 import { Pie, PieChart, Cell, ResponsiveContainer, Tooltip } from 'recharts';
 import { useFinance } from '@/lib/finance-context';
 import { useTheme } from '../hooks/useTheme';
-import { Button, Card, EmptyState, Icon, Input, Modal, ProgressBar, Select, StatCard } from '../components/ui';
+import { Badge, Button, Card, EmptyState, Icon, Input, Modal, PageHeader, ProgressBar, Select, StatCard } from '../components/ui';
 import { MonthEndWizard } from '../components/MonthEndWizard';
 import {
   calculatePlannedFreelanceIncomeForMonth,
@@ -35,6 +35,7 @@ export function Dashboard() {
   const [accountId, setAccountId] = useState('');
   const [note, setNote] = useState('');
   const [showWizard, setShowWizard] = useState(false);
+  const [showAdvancedInsights, setShowAdvancedInsights] = useState(settings.userExperience.mode === 'power');
 
   const isMonthClosed = (state.monthCloses || []).some(mc => mc.month === selectedMonth);
 
@@ -126,16 +127,6 @@ export function Dashboard() {
     .sort((a, b) => b.percentage - a.percentage);
   const categoryOptions = Object.entries(getExpenseCategoryMap(settings)).map(([value, info]) => ({ value, label: info.labelDe }));
   const accountOptions = [{ value: '', label: 'Ohne Konto' }, ...accounts.map((account) => ({ value: account.id, label: account.name }))];
-  const widgetOptions = [
-    { id: 'summary', label: 'Übersicht' },
-    { id: 'budget', label: 'Budget' },
-    { id: 'expense-overview', label: 'Ausgabenstruktur' },
-    { id: 'recent-expenses', label: 'Letzte Ausgaben' },
-    { id: 'savings', label: 'Sparziele' },
-    { id: 'quick-stats', label: 'Kennzahlen' },
-    { id: 'month-comparison', label: 'Monatsvergleich' },
-    { id: 'forecast', label: 'Prognose' },
-  ];
 
   const budgetRisks = budgetCategoryCards
     .filter((item) => item.percentage >= settings.budgetWarningThreshold)
@@ -169,6 +160,47 @@ export function Dashboard() {
     : primaryRisk
       ? `Achte auf ${getExpenseCategoryInfo(primaryRisk.category, settings).labelDe} – dort liegt das größte Limit-Risiko.`
       : 'Dein Monat ist stabil. Nutze Überschüsse für Sparziele oder schnellere Tilgung.';
+  const focusActions = accounts.length === 0
+    ? [
+        {
+          label: 'Setup öffnen',
+          icon: 'Sparkles',
+          variant: 'primary' as const,
+          onClick: () => window.dispatchEvent(new CustomEvent('open-onboarding')),
+        },
+        {
+          label: 'Konto anlegen',
+          icon: 'Landmark',
+          variant: 'secondary' as const,
+          onClick: () => router.push('/accounts'),
+        },
+        {
+          label: 'Einnahme erfassen',
+          icon: 'TrendingUp',
+          variant: 'secondary' as const,
+          onClick: () => router.push('/income'),
+        },
+      ]
+    : [
+        {
+          label: 'Ausgabe erfassen',
+          icon: 'Plus',
+          variant: 'primary' as const,
+          onClick: () => window.dispatchEvent(new CustomEvent('open-quick-capture', { detail: { type: 'expense' } })),
+        },
+        {
+          label: 'Budget prüfen',
+          icon: 'Target',
+          variant: 'secondary' as const,
+          onClick: () => router.push('/budget'),
+        },
+        {
+          label: 'Konten öffnen',
+          icon: 'Landmark',
+          variant: 'secondary' as const,
+          onClick: () => router.push('/accounts'),
+        },
+      ];
 
   const widgetSections: Record<string, ReactNode> = {
     summary: (
@@ -548,9 +580,72 @@ export function Dashboard() {
   };
 
   const activeWidgets = settings.dashboardWidgets.filter((widgetId) => widgetSections[widgetId]);
+  const streamlinedWidgets = settings.userExperience.mode === 'power'
+    ? activeWidgets
+    : (() => {
+        const reduced = activeWidgets.filter((widgetId) => widgetId !== 'summary' && widgetId !== 'budget');
+        return reduced.length > 0 ? reduced : activeWidgets;
+      })();
+  const primaryWidgetLimit = settings.userExperience.mode === 'guided'
+    ? 2
+    : settings.userExperience.mode === 'standard'
+      ? 4
+      : streamlinedWidgets.length;
+  const primaryWidgetIds = streamlinedWidgets.slice(0, primaryWidgetLimit);
+  const advancedWidgetIds = streamlinedWidgets.slice(primaryWidgetLimit);
+  const advancedInsightsOpen = settings.userExperience.mode === 'power' || showAdvancedInsights;
+
+  useEffect(() => {
+    const openMonthEndWizard = () => setShowWizard(true);
+    const toggleAdvancedDashboardInsights = () => setShowAdvancedInsights((current) => !current);
+
+    window.addEventListener('dashboard-open-month-end', openMonthEndWizard);
+    window.addEventListener('dashboard-toggle-advanced-insights', toggleAdvancedDashboardInsights);
+
+    return () => {
+      window.removeEventListener('dashboard-open-month-end', openMonthEndWizard);
+      window.removeEventListener('dashboard-toggle-advanced-insights', toggleAdvancedDashboardInsights);
+    };
+  }, []);
 
   return (
     <div className="space-y-6 animate-fade-in">
+      <PageHeader
+        eyebrow="Alltag"
+        title="Dashboard"
+        description={nextFocus}
+        badges={(
+          <>
+            <Badge color="#2563eb">Monat: {selectedMonth}</Badge>
+            <Badge color="#0f766e">{accounts.length > 0 ? `${accounts.length} Konten aktiv` : 'Konten einrichten'}</Badge>
+            <Badge color={isMonthClosed ? '#10b981' : '#f59e0b'}>{isMonthClosed ? 'Monat abgeschlossen' : 'Monatsabschluss offen'}</Badge>
+          </>
+        )}
+        actions={(
+          <>
+            {focusActions.map((action) => (
+              <Button key={action.label} variant={action.variant} icon={action.icon} onClick={action.onClick} className="w-full sm:min-w-[152px]">
+                {action.label}
+              </Button>
+            ))}
+          </>
+        )}
+        secondary={(
+          <div className="flex flex-wrap items-center gap-2">
+            <span className="rounded-full bg-slate-100 px-3 py-1.5 text-xs text-slate-500 dark:bg-gray-800 dark:text-gray-400">Die wichtigsten Schritte liegen oben, tiefere Analysen kommen erst darunter.</span>
+            {advancedWidgetIds.length > 0 && (
+              <button
+                type="button"
+                onClick={() => setShowAdvancedInsights((current) => !current)}
+                className="rounded-full border border-slate-200 px-3 py-1.5 text-xs font-medium text-slate-600 transition-colors hover:border-slate-300 hover:bg-slate-50 dark:border-gray-700 dark:text-gray-300 dark:hover:border-gray-600 dark:hover:bg-gray-800"
+              >
+                {advancedInsightsOpen ? 'Erweiterte Einblicke ausblenden' : 'Erweiterte Einblicke einblenden'}
+              </button>
+            )}
+          </div>
+        )}
+      />
+
       <Card className="overflow-hidden border-0 bg-gradient-to-br from-slate-950 via-slate-900 to-blue-900 text-white shadow-2xl shadow-slate-900/20">
         <div className="grid gap-6 p-6 lg:grid-cols-[1.35fr_0.95fr] lg:p-7">
           <div className="space-y-5">
@@ -857,99 +952,34 @@ export function Dashboard() {
         )}
       </Card>
 
-      <Card className="p-5">
-        <div className="mb-3 flex items-center justify-between">
-          <button onClick={() => router.push('/budget')} className="flex items-center gap-2 text-base font-semibold text-gray-900 dark:text-white hover:text-blue-600 dark:hover:text-blue-400 transition-colors group">
-            Budget-Überblick
-            <ExternalLink size={14} className="opacity-0 group-hover:opacity-100 transition-opacity" />
-          </button>
-          <span className={`text-sm font-semibold ${budgetRemaining >= 0 ? 'text-emerald-600 dark:text-emerald-400' : 'text-red-600 dark:text-red-400'}`}>
-            {budgetRemaining >= 0 ? 'Im Rahmen' : 'Über Budget'}
-          </span>
-        </div>
-        <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
-          <div className="rounded-xl bg-slate-50 p-3 dark:bg-gray-800/50">
-            <p className="text-xs text-slate-500 dark:text-gray-500">Budget gesamt</p>
-            <p className="mt-1 text-lg font-bold text-gray-900 dark:text-white">{formatCurrency(totalBudgetLimit, settings)}</p>
-          </div>
-          <div className="rounded-xl bg-slate-50 p-3 dark:bg-gray-800/50">
-            <p className="text-xs text-slate-500 dark:text-gray-500">Bisher ausgegeben</p>
-            <p className="mt-1 text-lg font-bold text-gray-900 dark:text-white">{formatCurrency(totalBudgetSpent, settings)}</p>
-          </div>
-          <div className="rounded-xl bg-slate-50 p-3 dark:bg-gray-800/50">
-            <p className="text-xs text-slate-500 dark:text-gray-500">Restbudget</p>
-            <p className={`mt-1 text-lg font-bold ${budgetRemaining >= 0 ? 'text-emerald-600 dark:text-emerald-400' : 'text-red-600 dark:text-red-400'}`}>
-              {formatCurrency(budgetRemaining, settings)}
-            </p>
-          </div>
-        </div>
-        {budgetCategoryCards.length > 0 && (
-          <div className="mt-4 space-y-3">
-            {budgetCategoryCards.slice(0, 6).map((item) => {
-              const info = getExpenseCategoryInfo(item.category, settings);
-              const isOver = item.percentage >= 100;
-              const isWarning = item.percentage >= settings.budgetWarningThreshold && !isOver;
-              return (
-                <div key={item.category} className="rounded-2xl border border-slate-200 p-3 dark:border-gray-800">
-                  <div className="mb-2 flex items-center justify-between gap-3">
-                    <div className="flex min-w-0 items-center gap-2">
-                      <div className="rounded-lg p-2" style={{ backgroundColor: `${info.color}15` }}>
-                        <Icon name={info.icon} size={14} color={info.color} />
-                      </div>
-                      <div className="min-w-0">
-                        <p className="truncate text-sm font-semibold text-gray-900 dark:text-white">{info.labelDe}</p>
-                        <p className="text-xs text-slate-500 dark:text-gray-500">
-                          {formatCurrency(item.spent, settings)} von {formatCurrency(item.limitAmount, settings)}
-                        </p>
-                      </div>
-                    </div>
-                    <span className={`text-sm font-semibold ${isOver ? 'text-red-600 dark:text-red-400' : isWarning ? 'text-amber-600 dark:text-amber-400' : 'text-gray-700 dark:text-gray-200'}`}>
-                      {item.percentage.toFixed(0)}%
-                    </span>
-                  </div>
-                  <ProgressBar
-                    value={Math.min(item.percentage, 100)}
-                    max={100}
-                    color={isOver ? '#ef4444' : isWarning ? '#f59e0b' : info.color}
-                    size="md"
-                  />
+      {streamlinedWidgets.length > 0 ? (
+        <>
+          {primaryWidgetIds.map((widgetId) => (
+            <div key={widgetId}>{widgetSections[widgetId]}</div>
+          ))}
+          {advancedWidgetIds.length > 0 && (
+            <Card className="p-5">
+              <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+                <div>
+                  <p className="text-sm font-semibold text-gray-900 dark:text-white">Weitere Einblicke</p>
+                  <p className="mt-1 text-sm text-slate-500 dark:text-gray-500">
+                    {advancedWidgetIds.length} zusätzliche Bereiche sind bereit, wenn du tiefer einsteigen willst.
+                  </p>
                 </div>
-              );
-            })}
-          </div>
-        )}
-      </Card>
-
-      <Card className="p-5">
-        <h3 className="mb-3 text-base font-semibold text-gray-900 dark:text-white">Dashboard-Bausteine</h3>
-        <div className="flex flex-wrap gap-2">
-          {widgetOptions.map((option) => {
-            const active = settings.dashboardWidgets.includes(option.id);
-            return (
-              <button
-                key={option.id}
-                onClick={() => {
-                  const next = active
-                    ? settings.dashboardWidgets.filter((widgetId) => widgetId !== option.id)
-                    : [...settings.dashboardWidgets, option.id];
-                  dispatch({ type: 'UPDATE_SETTINGS', payload: { dashboardWidgets: next } });
-                }}
-                className={`rounded-xl border px-3 py-2 text-xs font-medium transition-colors ${
-                  active
-                    ? 'border-blue-300 bg-blue-50 text-blue-700 dark:border-blue-700 dark:bg-blue-950/30 dark:text-blue-300'
-                    : 'border-slate-200 bg-white text-slate-600 dark:border-gray-700 dark:bg-gray-900 dark:text-gray-300'
-                }`}
-              >
-                {option.label}
-              </button>
-            );
-          })}
-        </div>
-      </Card>
-
-      {activeWidgets.length > 0 ? activeWidgets.map((widgetId) => (
-        <div key={widgetId}>{widgetSections[widgetId]}</div>
-      )) : (
+                <Button
+                  variant="secondary"
+                  onClick={() => setShowAdvancedInsights((current) => !current)}
+                >
+                  {advancedInsightsOpen ? 'Weniger anzeigen' : `${advancedWidgetIds.length} Bereiche öffnen`}
+                </Button>
+              </div>
+            </Card>
+          )}
+          {advancedInsightsOpen && advancedWidgetIds.map((widgetId) => (
+            <div key={widgetId}>{widgetSections[widgetId]}</div>
+          ))}
+        </>
+      ) : (
         <Card>
           <EmptyState icon="LayoutDashboard" title="Dashboard leer" description="Aktiviere im Bereich Einstellungen wieder Dashboard-Widgets." />
         </Card>

@@ -29,7 +29,7 @@ interface BrowserSpeechRecognitionEvent extends Event {
   };
 }
 
-export function QuickCaptureFab() {
+export function QuickCaptureFab({ desktopOnly = false }: { desktopOnly?: boolean }) {
   const { state, dispatch } = useFinance();
   const { settings, accounts } = state;
   const [isOpen, setIsOpen] = useState(false);
@@ -274,7 +274,7 @@ export function QuickCaptureFab() {
     <>
       <button
         onClick={() => setIsOpen(true)}
-        className="fixed bottom-[calc(6.75rem+var(--safe-area-bottom))] right-4 z-[80] inline-flex h-14 w-14 items-center justify-center rounded-full bg-blue-600 text-white shadow-xl shadow-blue-600/30 transition-all hover:scale-105 hover:bg-blue-700 md:bottom-[calc(6.25rem+var(--safe-area-bottom))] sm:right-6 lg:bottom-6 lg:right-6"
+        className={`fixed bottom-[calc(6.75rem+var(--safe-area-bottom))] right-4 z-[80] inline-flex h-14 w-14 items-center justify-center rounded-full bg-blue-600 text-white shadow-xl shadow-blue-600/30 transition-all hover:scale-105 hover:bg-blue-700 md:bottom-[calc(6.25rem+var(--safe-area-bottom))] sm:right-6 lg:bottom-6 lg:right-6 ${desktopOnly ? 'hidden lg:inline-flex' : ''}`}
         aria-label="Schnellerfassung öffnen"
       >
         <Plus size={24} />

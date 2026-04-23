@@ -920,6 +920,138 @@ export interface SearchResult {
   color: string;
 }
 
+interface SearchResultCandidate extends SearchResult {
+  score: number;
+  sortTimestamp: number;
+}
+
+interface SearchableField {
+  value?: string | null;
+  weight?: number;
+}
+
+const SEARCH_TYPE_PRIORITY: Record<SearchResult['type'], number> = {
+  expense: 26,
+  income: 24,
+  'fixed-expense': 20,
+  debt: 18,
+  savings: 18,
+  transfer: 16,
+  'freelance-project': 14,
+  invoice: 14,
+};
+
+const normalizeSearchValue = (value: string): string => value.toLowerCase().trim();
+
+const getFieldMatchScore = (value: string | null | undefined, query: string): number => {
+  if (!value) return 0;
+
+  const normalized = normalizeSearchValue(value);
+  if (!normalized) return 0;
+
+  if (normalized === query) return 120;
+  if (normalized.startsWith(query)) return 100;
+  if (normalized.split(/[\s,./:_-]+/).some((word) => word.startsWith(query))) return 88;
+  if (normalized.includes(query)) return 72;
+
+  return 0;
+};
+
+const getSearchMatchScore = (query: string, fields: SearchableField[]): number => {
+  let best = 0;
+  let support = 0;
+
+  fields.forEach((field) => {
+    const score = getFieldMatchScore(field.value, query);
+    if (score === 0) return;
+
+    const weighted = score + (field.weight || 0);
+    if (weighted > best) {
+      support = Math.max(support, Math.floor(best * 0.2));
+      best = weighted;
+      return;
+    }
+
+    support = Math.max(support, Math.floor(weighted * 0.35));
+  });
+
+  return best + support;
+};
+
+const getSearchSortTimestamp = (date?: string, contextMonth?: string): number => {
+  const source = date || (contextMonth ? `${contextMonth}-01` : '');
+  if (!source) return 0;
+
+  const timestamp = new Date(source).getTime();
+  return Number.isFinite(timestamp) ? timestamp : 0;
+};
+
+const buildAmountSearchFields = (
+  amount: number | undefined,
+  settings: Settings,
+  weight = 10,
+): SearchableField[] => {
+  if (typeof amount !== 'number' || Number.isNaN(amount)) {
+    return [];
+  }
+
+  const formatted = formatCurrency(amount, settings);
+  const fixed = amount.toFixed(2);
+
+  return [
+    { value: formatted, weight },
+    { value: formatted.replace(/\s+/g, ''), weight: weight - 1 },
+    { value: fixed, weight },
+    { value: fixed.replace('.', ','), weight },
+    { value: String(amount), weight: weight - 1 },
+    { value: String(Math.round(amount)), weight: weight - 2 },
+  ];
+};
+
+const buildDateSearchFields = (
+  date?: string,
+  contextMonth?: string,
+  weight = 8,
+): SearchableField[] => {
+  const fields: SearchableField[] = [];
+
+  if (date) {
+    fields.push({ value: date, weight });
+
+    if (/^\d{4}-\d{2}-\d{2}$/.test(date)) {
+      const monthKey = date.slice(0, 7);
+      fields.push({ value: formatDate(date, 'dd.MM.yyyy'), weight: weight + 2 });
+      fields.push({ value: formatDate(date, 'dd.MM'), weight: weight + 1 });
+      fields.push({ value: getMonthDisplayName(monthKey), weight });
+      fields.push({ value: getShortMonthName(monthKey), weight: weight - 1 });
+    }
+  }
+
+  if (contextMonth) {
+    fields.push({ value: contextMonth, weight });
+    fields.push({ value: getMonthDisplayName(contextMonth), weight });
+    fields.push({ value: getShortMonthName(contextMonth), weight: weight - 1 });
+  }
+
+  return fields;
+};
+
+const addSearchCandidate = (
+  results: SearchResultCandidate[],
+  query: string,
+  result: SearchResult,
+  fields: SearchableField[],
+): void => {
+  const score = getSearchMatchScore(query, fields);
+  if (score === 0) return;
+
+  results.push({
+    ...result,
+    score: score + SEARCH_TYPE_PRIORITY[result.type],
+    sortTimestamp: getSearchSortTimestamp(result.date, result.contextMonth),
+  });
+};
+
 export const globalSearch = (
   query: string,
   state: {
@@ -928,7 +1060,8 @@ export const globalSearch = (
     fixedExpenses: { id: string; name: string; amount: number; category: string }[];
     debts: { id: string; name: string; remainingAmount: number; totalAmount: number }[];
     savingsGoals: { id: string; name: string; currentAmount: number; targetAmount: number }[];
-    transfers: { id: string; amount: number; date: string; note?: string }[];
+    transfers: { id: string; amount: number; date: string; note?: string; fromAccountId?: string; toAccountId?: string }[];
+    accounts: { id: string; name: string }[];
     freelanceProjects: { id: string; name: string; clientName: string }[];
     freelanceInvoices: { id: string; invoiceNumber: string; clientName: string; grossAmount: number; issueDate: string }[];
     settings: Settings;
@@ -936,47 +1069,153 @@ export const globalSearch = (
 ): SearchResult[] => {
   const q = query.toLowerCase().trim();
   if (!q) return [];
-  const results: SearchResult[] = [];
+  const results: SearchResultCandidate[] = [];
+  const accountNameById = new Map(state.accounts.map((account) => [account.id, account.name]));
 
   for (const e of state.expenses) {
-    if (e.description.toLowerCase().includes(q) || e.tags?.some(t => t.toLowerCase().includes(q)) || e.note?.toLowerCase().includes(q)) {
-      const info = getExpenseCategoryInfo(e.category, state.settings);
-      results.push({ type: 'expense', id: e.id, title: e.description, subtitle: `${formatCurrency(e.amount, state.settings)} · ${e.date}`, amount: e.amount, date: e.date, contextMonth: e.date.slice(0, 7), icon: info.icon, color: info.color });
-    }
+    const info = getExpenseCategoryInfo(e.category, state.settings);
+    addSearchCandidate(results, q, {
+      type: 'expense',
+      id: e.id,
+      title: e.description,
+      subtitle: `${formatCurrency(e.amount, state.settings)} · ${e.date}`,
+      amount: e.amount,
+      date: e.date,
+      contextMonth: e.date.slice(0, 7),
+      icon: info.icon,
+      color: info.color,
+    }, [
+      { value: e.description, weight: 12 },
+      { value: info.labelDe, weight: 8 },
+      { value: e.tags?.join(' '), weight: 4 },
+      { value: e.note, weight: 2 },
+      ...buildAmountSearchFields(e.amount, state.settings),
+      ...buildDateSearchFields(e.date, e.date.slice(0, 7)),
+    ]);
   }
   for (const i of state.incomes) {
-    if (i.name.toLowerCase().includes(q)) {
-      const contextMonth = i.month || i.date?.slice(0, 7) || i.effectiveFromMonth || i.startMonth || i.createdAt?.slice(0, 7);
-      results.push({ type: 'income', id: i.id, title: i.name, subtitle: formatCurrency(i.amount, state.settings), amount: i.amount, date: i.month, contextMonth, icon: 'TrendingUp', color: '#10b981' });
-    }
+    const contextMonth = i.month || i.date?.slice(0, 7) || i.effectiveFromMonth || i.startMonth || i.createdAt?.slice(0, 7);
+    addSearchCandidate(results, q, {
+      type: 'income',
+      id: i.id,
+      title: i.name,
+      subtitle: formatCurrency(i.amount, state.settings),
+      amount: i.amount,
+      date: i.month,
+      contextMonth,
+      icon: 'TrendingUp',
+      color: '#10b981',
+    }, [
+      { value: i.name, weight: 12 },
+      ...buildAmountSearchFields(i.amount, state.settings),
+      ...buildDateSearchFields(i.date, contextMonth, 7),
+    ]);
   }
   for (const f of state.fixedExpenses) {
-    if (f.name.toLowerCase().includes(q)) {
-      results.push({ type: 'fixed-expense', id: f.id, title: f.name, subtitle: formatCurrency(f.amount, state.settings), amount: f.amount, icon: 'Receipt', color: '#6366f1' });
-    }
+    const categoryInfo = getExpenseCategoryInfo(f.category, state.settings);
+    addSearchCandidate(results, q, {
+      type: 'fixed-expense',
+      id: f.id,
+      title: f.name,
+      subtitle: formatCurrency(f.amount, state.settings),
+      amount: f.amount,
+      icon: 'Receipt',
+      color: '#6366f1',
+    }, [
+      { value: f.name, weight: 12 },
+      { value: categoryInfo.labelDe, weight: 6 },
+      ...buildAmountSearchFields(f.amount, state.settings, 8),
+    ]);
   }
   for (const d of state.debts) {
-    if (d.name.toLowerCase().includes(q)) {
-      results.push({ type: 'debt', id: d.id, title: d.name, subtitle: `${formatCurrency(d.remainingAmount, state.settings)} verbleibend`, amount: d.remainingAmount, icon: 'CreditCard', color: '#ef4444' });
-    }
+    addSearchCandidate(results, q, {
+      type: 'debt',
+      id: d.id,
+      title: d.name,
+      subtitle: `${formatCurrency(d.remainingAmount, state.settings)} verbleibend`,
+      amount: d.remainingAmount,
+      icon: 'CreditCard',
+      color: '#ef4444',
+    }, [
+      { value: d.name, weight: 12 },
+      ...buildAmountSearchFields(d.remainingAmount, state.settings, 8),
+      ...buildAmountSearchFields(d.totalAmount, state.settings, 6),
+    ]);
   }
   for (const s of state.savingsGoals) {
-    if (s.name.toLowerCase().includes(q)) {
-      results.push({ type: 'savings', id: s.id, title: s.name, subtitle: `${formatCurrency(s.currentAmount, state.settings)} / ${formatCurrency(s.targetAmount, state.settings)}`, amount: s.currentAmount, icon: 'PiggyBank', color: '#10b981' });
-    }
+    addSearchCandidate(results, q, {
+      type: 'savings',
+      id: s.id,
+      title: s.name,
+      subtitle: `${formatCurrency(s.currentAmount, state.settings)} / ${formatCurrency(s.targetAmount, state.settings)}`,
+      amount: s.currentAmount,
+      icon: 'PiggyBank',
+      color: '#10b981',
+    }, [
+      { value: s.name, weight: 12 },
+      ...buildAmountSearchFields(s.currentAmount, state.settings, 8),
+      ...buildAmountSearchFields(s.targetAmount, state.settings, 6),
+    ]);
+  }
+  for (const t of state.transfers) {
+    const fromAccountName = accountNameById.get(t.fromAccountId || '') || 'Quelle';
+    const toAccountName = accountNameById.get(t.toAccountId || '') || 'Ziel';
+    addSearchCandidate(results, q, {
+      type: 'transfer',
+      id: t.id,
+      title: t.note || 'Umbuchung',
+      subtitle: `${fromAccountName} → ${toAccountName} · ${formatCurrency(t.amount, state.settings)} · ${t.date}`,
+      amount: t.amount,
+      date: t.date,
+      contextMonth: t.date.slice(0, 7),
+      icon: 'ArrowRightLeft',
+      color: '#0ea5e9',
+    }, [
+      { value: t.note, weight: 12 },
+      { value: `${fromAccountName} ${toAccountName}`, weight: 8 },
+      ...buildAmountSearchFields(t.amount, state.settings, 9),
+      ...buildDateSearchFields(t.date, t.date.slice(0, 7), 7),
+    ]);
   }
   for (const p of state.freelanceProjects) {
-    if (p.name.toLowerCase().includes(q) || p.clientName.toLowerCase().includes(q)) {
-      results.push({ type: 'freelance-project', id: p.id, title: p.name, subtitle: p.clientName, icon: 'Briefcase', color: '#8b5cf6' });
-    }
+    addSearchCandidate(results, q, {
+      type: 'freelance-project',
+      id: p.id,
+      title: p.name,
+      subtitle: p.clientName,
+      icon: 'Briefcase',
+      color: '#8b5cf6',
+    }, [
+      { value: p.name, weight: 12 },
+      { value: p.clientName, weight: 8 },
+    ]);
   }
   for (const inv of state.freelanceInvoices) {
-    if (inv.invoiceNumber.toLowerCase().includes(q) || inv.clientName.toLowerCase().includes(q)) {
-      results.push({ type: 'invoice', id: inv.id, title: inv.invoiceNumber, subtitle: `${inv.clientName} · ${formatCurrency(inv.grossAmount, state.settings)}`, amount: inv.grossAmount, date: inv.issueDate, icon: 'FileText', color: '#f59e0b' });
-    }
+    addSearchCandidate(results, q, {
+      type: 'invoice',
+      id: inv.id,
+      title: inv.invoiceNumber,
+      subtitle: `${inv.clientName} · ${formatCurrency(inv.grossAmount, state.settings)}`,
+      amount: inv.grossAmount,
+      date: inv.issueDate,
+      icon: 'FileText',
+      color: '#f59e0b',
+    }, [
+      { value: inv.invoiceNumber, weight: 14 },
+      { value: inv.clientName, weight: 8 },
+      ...buildAmountSearchFields(inv.grossAmount, state.settings, 9),
+      ...buildDateSearchFields(inv.issueDate, inv.issueDate.slice(0, 7), 7),
+    ]);
   }
 
-  return results.slice(0, 50);
+  return results
+    .sort((left, right) => {
+      if (right.score !== left.score) return right.score - left.score;
+      if (right.sortTimestamp !== left.sortTimestamp) return right.sortTimestamp - left.sortTimestamp;
+      return left.title.localeCompare(right.title, 'de');
+    })
+    .slice(0, 50)
+    .map(({ score, sortTimestamp, ...result }) => result);
 };
 
 // Duplicate detection for expenses
