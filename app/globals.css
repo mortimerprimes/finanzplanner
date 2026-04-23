@@ -9,6 +9,9 @@
     --safe-area-right: env(safe-area-inset-right, 0px);
     --safe-area-bottom: env(safe-area-inset-bottom, 0px);
     --safe-area-left: env(safe-area-inset-left, 0px);
+    --mobile-header-height: calc(3.5rem + var(--safe-area-top));
+    --mobile-bottom-nav-height: calc(5rem + var(--safe-area-bottom));
+    --mobile-content-padding: 0.875rem;
   }
 
   *,
@@ -22,6 +25,7 @@
     min-height: 100%;
     width: 100%;
     overscroll-behavior-x: none;
+    overscroll-behavior-y: none;
   }
 
   body {
@@ -73,9 +77,22 @@ html {
   }
 }
 
+@layer utilities {
+  .touch-target {
+    min-width: 2.75rem;
+    min-height: 2.75rem;
+  }
+}
+
 body.mobile-menu-open {
   overflow: hidden;
   touch-action: none;
+}
+
+@media (max-width: 639px) {
+  :root {
+    --mobile-content-padding: 0.75rem;
+  }
 }
 
 @media (max-width: 1024px) {
@@ -88,6 +105,15 @@ body.mobile-menu-open {
   .app-shell {
     min-height: 100dvh;
     height: 100dvh;
+  }
+
+  .safe-x-mobile {
+    padding-left: max(var(--mobile-content-padding), var(--safe-area-left));
+    padding-right: max(var(--mobile-content-padding), var(--safe-area-right));
+  }
+
+  .safe-pb-nav-mobile {
+    padding-bottom: calc(var(--mobile-bottom-nav-height) + 0.75rem);
   }
 }
 

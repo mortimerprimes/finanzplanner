@@ -353,23 +353,26 @@ export function AppLayout({ children }: { children: React.ReactNode }) {
       </aside>
 
       {/* MOBILE HEADER */}
-      <div className="lg:hidden fixed inset-x-0 top-0 z-50 flex h-[calc(3.5rem+var(--safe-area-top))] items-center justify-between border-b border-slate-200 bg-white/95 px-4 pt-[var(--safe-area-top)] backdrop-blur-xl dark:border-gray-800 dark:bg-gray-900/95">
+      <div className="safe-x-mobile lg:hidden fixed inset-x-0 top-0 z-50 flex h-[var(--mobile-header-height)] items-center justify-between border-b border-slate-200 bg-white/95 pt-[var(--safe-area-top)] backdrop-blur-xl dark:border-gray-800 dark:bg-gray-900/95">
         <button
           onClick={() => setMobileMenuOpen(!mobileMenuOpen)}
-          className="p-2 rounded-lg hover:bg-slate-100 dark:hover:bg-gray-800 text-slate-700 dark:text-gray-300"
+          className="touch-target rounded-xl p-2 text-slate-700 transition-colors hover:bg-slate-100 dark:text-gray-300 dark:hover:bg-gray-800"
         >
           {mobileMenuOpen ? <X size={22} /> : <Menu size={22} />}
         </button>
-        <h1 className="text-base font-bold text-gray-900 dark:text-white">💰 Finanzplanner</h1>
+        <div className="min-w-0 flex-1 px-3">
+          <p className="truncate text-[10px] font-bold uppercase tracking-[0.16em] text-slate-400 dark:text-gray-500">Finanzplanner</p>
+          <h1 className="truncate text-sm font-semibold text-gray-900 dark:text-white">{currentNavItem?.label || 'Dashboard'}</h1>
+        </div>
         <div className="flex items-center gap-1">
           <GlobalSearch
-            buttonClassName="inline-flex rounded-lg p-2 text-slate-500 transition-colors hover:bg-slate-100 dark:text-gray-400 dark:hover:bg-gray-800 lg:hidden"
+            buttonClassName="touch-target inline-flex rounded-xl p-2 text-slate-500 transition-colors hover:bg-slate-100 dark:text-gray-400 dark:hover:bg-gray-800 lg:hidden"
             iconOnly
           />
           <NotificationBell />
           <button
             onClick={cycleTheme}
-            className="p-2 rounded-lg hover:bg-slate-100 dark:hover:bg-gray-800 text-slate-500 dark:text-gray-400"
+            className="touch-target rounded-xl p-2 text-slate-500 transition-colors hover:bg-slate-100 dark:text-gray-400 dark:hover:bg-gray-800"
           >
           <ThemeIcon size={20} />
         </button>
@@ -380,7 +383,7 @@ export function AppLayout({ children }: { children: React.ReactNode }) {
       {mobileMenuOpen && (
         <>
           <div className="lg:hidden fixed inset-0 z-40 bg-black/40 animate-overlay" onClick={() => setMobileMenuOpen(false)} />
-          <div className="lg:hidden fixed bottom-0 left-0 top-[calc(3.5rem+var(--safe-area-top))] z-40 w-[85vw] max-w-xs overflow-y-auto border-r border-slate-200 bg-white dark:border-gray-800 dark:bg-gray-900 animate-fade-in">
+          <div className="lg:hidden fixed bottom-0 left-0 top-[var(--mobile-header-height)] z-40 w-[min(88vw,22rem)] overflow-y-auto border-r border-slate-200 bg-white dark:border-gray-800 dark:bg-gray-900 animate-fade-in">
             <nav className="space-y-0.5 px-3 pb-[calc(1rem+var(--safe-area-bottom))] pt-3">
               {visibleGroups.map((group) => (
                 <div key={group.label}>
@@ -439,24 +442,24 @@ export function AppLayout({ children }: { children: React.ReactNode }) {
 
       {/* MAIN CONTENT */}
       <div className="flex-1 flex flex-col min-w-0 h-screen overflow-hidden">
-        <header className="mt-[calc(3.5rem+var(--safe-area-top))] flex min-h-16 flex-shrink-0 flex-wrap items-center gap-2 border-b border-slate-200 bg-white px-3 py-2 dark:border-gray-800 dark:bg-gray-900 lg:mt-0 lg:gap-3 lg:px-6 lg:py-3">
-          <h2 className="text-xl font-bold text-gray-900 dark:text-white truncate">
+        <header className="safe-x-mobile mt-[var(--mobile-header-height)] flex min-h-16 flex-shrink-0 flex-wrap items-center gap-3 border-b border-slate-200 bg-white py-2.5 dark:border-gray-800 dark:bg-gray-900 lg:mt-0 lg:gap-3 lg:px-6 lg:py-3">
+          <h2 className="min-w-0 flex-1 truncate text-lg font-bold text-gray-900 dark:text-white lg:flex-none lg:text-xl">
             {currentNavItem?.label || 'Dashboard'}
           </h2>
 
           {!isSettingsPage && (
-            <div className="ml-auto flex w-full items-center gap-1 rounded-xl bg-slate-100 p-1 dark:bg-gray-800 sm:w-auto flex-shrink-0">
-              <button onClick={handlePrevMonth} className="p-2 rounded-lg hover:bg-white dark:hover:bg-gray-700 transition-colors">
+            <div className="ml-auto flex w-full items-center gap-1 rounded-2xl bg-slate-100 p-1 dark:bg-gray-800 sm:w-auto flex-shrink-0">
+              <button onClick={handlePrevMonth} className="touch-target rounded-xl p-2 transition-colors hover:bg-white dark:hover:bg-gray-700">
                 <ChevronLeft size={18} className="text-slate-600 dark:text-gray-400" />
               </button>
               <button
                 onClick={() => setMonthPickerOpen(true)}
-                className="inline-flex min-w-0 flex-1 items-center justify-center gap-2 rounded-lg px-3 py-1.5 text-sm font-semibold text-gray-900 transition-colors hover:bg-white dark:text-white dark:hover:bg-gray-700 sm:min-w-[160px] sm:flex-none"
+                className="inline-flex min-w-0 flex-1 items-center justify-center gap-2 rounded-xl px-3 py-2 text-sm font-semibold text-gray-900 transition-colors hover:bg-white dark:text-white dark:hover:bg-gray-700 sm:min-w-[160px] sm:flex-none"
               >
                 <CalendarDays size={15} className="text-slate-500 dark:text-gray-400" />
-                {getMonthDisplayName(state.selectedMonth)}
+                <span className="truncate">{getMonthDisplayName(state.selectedMonth)}</span>
               </button>
-              <button onClick={handleNextMonth} className="p-2 rounded-lg hover:bg-white dark:hover:bg-gray-700 transition-colors">
+              <button onClick={handleNextMonth} className="touch-target rounded-xl p-2 transition-colors hover:bg-white dark:hover:bg-gray-700">
                 <ChevronRight size={18} className="text-slate-600 dark:text-gray-400" />
               </button>
             </div>
@@ -467,7 +470,7 @@ export function AppLayout({ children }: { children: React.ReactNode }) {
           </div>
         </header>
 
-        <main className="flex-1 overflow-y-auto overflow-x-hidden p-3 pb-[calc(5.5rem+var(--safe-area-bottom))] md:p-5 lg:p-6 lg:pb-6">
+        <main className="safe-x-mobile safe-pb-nav-mobile flex-1 overflow-y-auto overflow-x-hidden pt-3 md:p-5 lg:p-6 lg:pb-6">
           <div className="mx-auto w-full max-w-6xl 2xl:max-w-[1320px]">
             {needsSetupBanner && !isSettingsPage && (
               <div className="mb-4 overflow-hidden rounded-2xl border border-blue-200 bg-gradient-to-r from-blue-50 via-white to-cyan-50 p-4 shadow-sm dark:border-blue-900/40 dark:from-blue-950/30 dark:via-gray-900 dark:to-cyan-950/20 sm:rounded-3xl">
@@ -517,8 +520,8 @@ export function AppLayout({ children }: { children: React.ReactNode }) {
         </main>
       </div>
 
-      <nav className="lg:hidden fixed inset-x-0 bottom-0 z-40 border-t border-slate-200 bg-white/95 px-2 pb-[var(--safe-area-bottom)] pt-2 backdrop-blur-xl dark:border-gray-800 dark:bg-gray-900/95">
-        <div className="grid grid-cols-5 gap-1">
+      <nav className="safe-x-mobile lg:hidden fixed inset-x-0 bottom-0 z-40 border-t border-slate-200 bg-white/95 pb-[var(--safe-area-bottom)] pt-2.5 backdrop-blur-xl dark:border-gray-800 dark:bg-gray-900/95">
+        <div className="grid grid-cols-5 gap-1.5">
           {APP_MOBILE_NAV_ITEMS.map((item) => {
             const ItemIcon = item.icon;
 
@@ -527,9 +530,9 @@ export function AppLayout({ children }: { children: React.ReactNode }) {
                 <button
                   key={item.label}
                   onClick={handleOpenQuickCapture}
-                  className="flex min-h-[3.5rem] flex-col items-center justify-center gap-1 rounded-2xl px-1 py-2 text-[11px] font-medium text-slate-700 transition-all dark:text-white"
+                  className="flex min-h-[3.9rem] flex-col items-center justify-center gap-1 rounded-2xl px-1 py-2 text-[11px] font-medium text-slate-700 transition-all dark:text-white"
                 >
-                  <span className="flex h-11 w-11 items-center justify-center rounded-full bg-blue-600 text-white shadow-lg shadow-blue-600/30">
+                  <span className="flex h-12 w-12 items-center justify-center rounded-full bg-blue-600 text-white shadow-lg shadow-blue-600/30">
                     <ItemIcon size={18} />
                   </span>
                   <span>{item.label}</span>
@@ -542,7 +545,7 @@ export function AppLayout({ children }: { children: React.ReactNode }) {
               <Link
                 key={item.href}
                 href={item.href}
-                className={`flex min-h-[3.5rem] flex-col items-center justify-center gap-1 rounded-2xl px-1 py-2 text-[11px] font-medium transition-all ${
+                className={`flex min-h-[3.9rem] flex-col items-center justify-center gap-1 rounded-2xl px-1 py-2 text-[11px] font-medium transition-all ${
                   isActive
                     ? 'bg-blue-600 text-white shadow-md shadow-blue-600/25'
                     : 'text-slate-600 hover:bg-slate-100 dark:text-gray-400 dark:hover:bg-gray-800'
@@ -555,7 +558,7 @@ export function AppLayout({ children }: { children: React.ReactNode }) {
           })}
           <button
             onClick={() => setMobileMenuOpen((value) => !value)}
-            className={`flex min-h-[3.5rem] flex-col items-center justify-center gap-1 rounded-2xl px-1 py-2 text-[11px] font-medium transition-all ${
+            className={`flex min-h-[3.9rem] flex-col items-center justify-center gap-1 rounded-2xl px-1 py-2 text-[11px] font-medium transition-all ${
               isMobileMoreActive
                 ? 'bg-slate-900 text-white dark:bg-white dark:text-gray-900'
                 : 'text-slate-600 hover:bg-slate-100 dark:text-gray-400 dark:hover:bg-gray-800'

@@ -301,18 +301,18 @@ export function AnalyticsPage() {
 
   return (
     <div className="space-y-6 animate-fade-in">
-      <div className="flex flex-col gap-2 sm:flex-row sm:items-end sm:justify-between">
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
         <div>
           <h2 className="text-lg font-bold text-gray-900 dark:text-white">Finanzanalyse</h2>
           <p className="text-sm text-slate-500 dark:text-gray-500">Vergleiche, Jahresbild, Top-Ausgaben und Was-wäre-wenn-Simulationen</p>
         </div>
-        <div className="inline-flex items-center gap-2 rounded-2xl border border-slate-200 bg-white px-4 py-2 text-sm dark:border-gray-800 dark:bg-gray-900">
+        <div className="inline-flex w-full items-center justify-center gap-2 rounded-2xl border border-slate-200 bg-white px-4 py-2 text-sm dark:border-gray-800 dark:bg-gray-900 sm:w-auto sm:justify-start">
           <Sparkles size={16} className="text-violet-500" />
           <span className="font-medium text-gray-900 dark:text-white">Analysefenster: {settings.analyticsMonths} Monate</span>
         </div>
       </div>
 
-      <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-5">
+      <div className="grid grid-cols-1 gap-4 min-[430px]:grid-cols-2 xl:grid-cols-5">
         <Card className="p-5">
           <div className="flex items-center justify-between gap-3">
             <div>
@@ -462,7 +462,7 @@ export function AnalyticsPage() {
         </Card>
       </div>
 
-      <div className="grid grid-cols-1 gap-4 xl:grid-cols-[1fr_1fr_1fr]">
+      <div className="grid grid-cols-1 gap-4 lg:grid-cols-2 xl:grid-cols-[1fr_1fr_1fr]">
         <Card className="p-5">
           <h3 className="mb-4 text-base font-semibold text-gray-900 dark:text-white">Top-Ausgaben</h3>
           <div className="space-y-2">
@@ -516,14 +516,14 @@ export function AnalyticsPage() {
                 <span>Ziel-Schulden auswählen</span>
                 <span>{selectedDebts.length} ausgewählt</span>
               </div>
-              <div className="flex flex-wrap gap-2">
+              <div className="-mx-1 flex gap-2 overflow-x-auto px-1 pb-1 sm:mx-0 sm:flex-wrap sm:px-0">
                 {debts.length > 0 ? debts.map((debt) => {
                   const isActive = selectedDebtIds.includes(debt.id);
                   return (
                     <button
                       key={debt.id}
                       onClick={() => toggleDebt(debt.id)}
-                      className={`rounded-full border px-3 py-2 text-xs font-semibold transition-colors ${
+                      className={`shrink-0 rounded-full border px-3 py-2 text-xs font-semibold transition-colors sm:shrink ${
                         isActive
                           ? 'border-violet-500 bg-violet-500 text-white'
                           : 'border-slate-200 bg-slate-50 text-slate-700 dark:border-gray-800 dark:bg-gray-800/60 dark:text-gray-300'
@@ -640,8 +640,9 @@ export function AnalyticsPage() {
       {/* Expense Heatmap */}
       <Card className="p-5">
         <h3 className="mb-4 text-base font-semibold text-gray-900 dark:text-white">Ausgaben-Heatmap (90 Tage)</h3>
+        <p className="mb-3 text-xs text-slate-500 dark:text-gray-500">Wische horizontal, um den vollständigen 90-Tage-Verlauf zu sehen.</p>
         <div className="overflow-x-auto pb-2">
-          <div className="flex min-w-[420px] gap-0.5 sm:min-w-[650px]">
+          <div className="flex min-w-[22rem] gap-0.5 sm:min-w-[40.5rem]">
             {Array.from({ length: 13 }, (_, week) => (
               <div key={week} className="flex flex-col gap-0.5">
                 {Array.from({ length: 7 }, (_, day) => {
@@ -902,8 +903,9 @@ export function AnalyticsPage() {
       {/* ====== DETAILED FORECAST TABLE ====== */}
       <Card className="p-5">
         <h3 className="mb-4 text-base font-semibold text-gray-900 dark:text-white">Detailprognose — Monat für Monat</h3>
-        <div className="overflow-x-auto">
-          <table className="w-full text-xs">
+        <p className="mb-3 text-xs text-slate-500 dark:text-gray-500">Wische horizontal für alle Spalten und Monatswerte.</p>
+        <div className="overflow-x-auto pb-2">
+          <table className="min-w-[44rem] text-xs sm:min-w-full">
             <thead>
               <tr className="text-left uppercase tracking-wide text-slate-500 dark:text-gray-400">
                 <th className="pb-2 pr-3">Monat</th>

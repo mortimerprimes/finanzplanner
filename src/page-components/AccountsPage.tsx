@@ -463,7 +463,7 @@ export function AccountsPage() {
                 Öffne Transfers und Import nur bei Bedarf und halte die Kontoübersicht als Hauptarbeitsfläche sauber.
               </p>
             </div>
-            <div className="grid grid-cols-1 gap-2 sm:grid-cols-2 lg:min-w-[420px]">
+            <div className="grid w-full grid-cols-1 gap-2 sm:w-auto sm:grid-cols-2 lg:min-w-[420px]">
               <Button variant="secondary" icon="ArrowRightLeft" onClick={() => setTransferModalOpen(true)}>
                 Transfer
               </Button>
@@ -475,7 +475,7 @@ export function AccountsPage() {
         </Card>
       )}
 
-      <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
+      <div className="grid grid-cols-1 gap-4 min-[430px]:grid-cols-2 lg:grid-cols-3">
         <Card className="p-5">
           <p className="text-xs font-medium text-slate-500 dark:text-gray-500">Assets gesamt</p>
           <p className="mt-1 text-2xl font-bold text-gray-900 dark:text-white">{formatCurrency(totalAssets, settings)}</p>
@@ -516,7 +516,7 @@ export function AccountsPage() {
               {accounts.map((account) => {
                 const accountType = ACCOUNT_TYPES[account.type];
                 return (
-                  <div key={account.id} className="flex items-center justify-between gap-3 rounded-2xl border border-slate-200 p-4 dark:border-gray-800">
+                  <div key={account.id} className="flex flex-col gap-3 rounded-2xl border border-slate-200 p-4 dark:border-gray-800 sm:flex-row sm:items-center sm:justify-between">
                     <div className="flex min-w-0 items-center gap-3">
                       <div className="rounded-xl p-2.5" style={{ backgroundColor: `${account.color}18` }}>
                         <Icon name={account.icon || accountType.icon} size={18} color={account.color || accountType.color} />
@@ -537,7 +537,7 @@ export function AccountsPage() {
                         )}
                       </div>
                     </div>
-                    <div className="flex items-center gap-3">
+                    <div className="flex w-full items-center justify-between gap-3 sm:w-auto sm:justify-end">
                       <p className={`text-lg font-bold ${account.balance >= 0 ? 'text-gray-900 dark:text-white' : 'text-red-600 dark:text-red-400'}`}>
                         {formatCurrency(account.balance, settings)}
                       </p>
@@ -602,7 +602,7 @@ export function AccountsPage() {
                   <div
                     key={transfer.id}
                     id={`transfer-${transfer.id}`}
-                    className={`flex items-center justify-between gap-3 rounded-xl bg-slate-50 px-3 py-2 transition-all dark:bg-gray-800/50 ${highlightedTransferId === transfer.id ? 'ring-2 ring-blue-300 dark:ring-blue-700' : ''}`}
+                    className={`flex flex-col gap-2 rounded-xl bg-slate-50 px-3 py-2 transition-all dark:bg-gray-800/50 sm:flex-row sm:items-center sm:justify-between ${highlightedTransferId === transfer.id ? 'ring-2 ring-blue-300 dark:ring-blue-700' : ''}`}
                   >
                     <div className="min-w-0">
                       <p className="truncate text-sm font-medium text-gray-900 dark:text-white">{from?.name || 'Quelle'} → {to?.name || 'Ziel'}</p>
@@ -658,14 +658,14 @@ export function AccountsPage() {
           </div>
           <Input label="Notiz (optional)" value={note} onChange={setNote} placeholder="Bank, Zweck oder Kommentar" />
           {type === 'credit' && (
-            <div className="grid grid-cols-2 gap-3">
+            <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
               <Input label="Abrechnungstag" type="number" value={billingCycleDay} onChange={setBillingCycleDay} placeholder="z.B. 15" />
               <Input label="Fälligkeitstag" type="number" value={paymentDueDay} onChange={setPaymentDueDay} placeholder="z.B. 1" />
             </div>
           )}
-          <div className="flex gap-3 pt-2">
-            <Button variant="secondary" onClick={closeAccountModal} className="flex-1">Abbrechen</Button>
-            <Button onClick={handleSaveAccount} className="flex-1">{editingAccount ? 'Speichern' : 'Anlegen'}</Button>
+          <div className="flex flex-col-reverse gap-3 pt-2 sm:flex-row">
+            <Button variant="secondary" onClick={closeAccountModal} className="w-full flex-1">Abbrechen</Button>
+            <Button onClick={handleSaveAccount} className="w-full flex-1">{editingAccount ? 'Speichern' : 'Anlegen'}</Button>
           </div>
         </div>
       </Modal>
@@ -678,9 +678,9 @@ export function AccountsPage() {
           </div>
           <Input label="Betrag" type="number" value={transferAmount} onChange={setTransferAmount} placeholder="0.00" icon="Euro" />
           <Input label="Notiz (optional)" value={transferNote} onChange={setTransferNote} placeholder="Umbuchung oder Sparrate" />
-          <div className="flex gap-3 pt-2">
-            <Button variant="secondary" onClick={() => setTransferModalOpen(false)} className="flex-1">Abbrechen</Button>
-            <Button onClick={handleTransfer} className="flex-1">Transfer speichern</Button>
+          <div className="flex flex-col-reverse gap-3 pt-2 sm:flex-row">
+            <Button variant="secondary" onClick={() => setTransferModalOpen(false)} className="w-full flex-1">Abbrechen</Button>
+            <Button onClick={handleTransfer} className="w-full flex-1">Transfer speichern</Button>
           </div>
         </div>
       </Modal>
@@ -717,18 +717,19 @@ export function AccountsPage() {
             </div>
           )}
 
-          <div className="flex flex-wrap gap-3">
-            <Button variant="secondary" onClick={runAICategorization} disabled={importAILoading || parsedTransactions.length === 0}>
+          <div className="grid grid-cols-1 gap-2 sm:flex sm:flex-wrap">
+            <Button variant="secondary" onClick={runAICategorization} disabled={importAILoading || parsedTransactions.length === 0} className="w-full sm:w-auto">
               {importAILoading ? <Sparkles size={14} className="animate-pulse" /> : <BrainCircuit size={14} />}
               Mit AI kategorisieren
             </Button>
-            <Button variant="secondary" onClick={reapplyImportAssignments} disabled={parsedTransactions.length === 0}>
+            <Button variant="secondary" onClick={reapplyImportAssignments} disabled={parsedTransactions.length === 0} className="w-full sm:w-auto">
               Regeln neu anwenden
             </Button>
             <Button
               variant="secondary"
               onClick={() => setImportDrafts((current) => current.map((draft) => ({ ...draft, accountId: importAccountId })))}
               disabled={importDrafts.length === 0}
+              className="w-full sm:w-auto"
             >
               Konto für alle übernehmen
             </Button>
@@ -738,7 +739,7 @@ export function AccountsPage() {
 
           {importDrafts.length > 0 && (
             <>
-              <div className="grid grid-cols-2 gap-3 sm:grid-cols-5 lg:grid-cols-6">
+              <div className="grid grid-cols-2 gap-3 min-[430px]:grid-cols-3 sm:grid-cols-5 lg:grid-cols-6">
                 {[
                   { label: 'Buchungen', value: importCounts.total },
                   { label: 'Duplikate', value: importCounts.duplicates },
@@ -758,15 +759,15 @@ export function AccountsPage() {
                 {importDrafts.map((draft) => (
                   <div key={draft.id} className={`rounded-2xl border p-4 ${draft.isDuplicate ? 'border-amber-300 bg-amber-50/40 dark:border-amber-900/50 dark:bg-amber-950/10' : 'border-slate-200 dark:border-gray-800'}`}>
                     <div className="flex flex-wrap items-center justify-between gap-3">
-                      <div className="flex items-center gap-3">
+                      <div className="flex min-w-0 items-start gap-3">
                         <input
                           type="checkbox"
                           checked={draft.selected}
                           onChange={(event) => setImportDrafts((current) => current.map((item) => item.id === draft.id ? { ...item, selected: event.target.checked } : item))}
                           className="h-4 w-4 rounded border-slate-300 text-blue-600 focus:ring-blue-500"
                         />
-                        <div>
-                          <p className="text-sm font-semibold text-gray-900 dark:text-white">{draft.description}</p>
+                        <div className="min-w-0">
+                          <p className="truncate text-sm font-semibold text-gray-900 dark:text-white">{draft.description}</p>
                           <p className="text-xs text-slate-500 dark:text-gray-500">{draft.date}{draft.isDuplicate ? ' · vermutlich schon importiert' : ''}{draft.confidence ? ` · AI ${Math.round(draft.confidence * 100)}%` : ''}</p>
                           <div className="mt-2 flex flex-wrap gap-2">
                             {draft.isDuplicate && <Badge color="#d97706">Duplikat</Badge>}
@@ -914,9 +915,9 @@ export function AccountsPage() {
             </>
           )}
 
-          <div className="flex gap-3 pt-2">
-            <Button variant="secondary" onClick={resetImportFlow} className="flex-1">Abbrechen</Button>
-            <Button onClick={importBankTransactions} className="flex-1" disabled={importDrafts.length === 0}>
+          <div className="flex flex-col-reverse gap-3 pt-2 sm:flex-row">
+            <Button variant="secondary" onClick={resetImportFlow} className="w-full flex-1">Abbrechen</Button>
+            <Button onClick={importBankTransactions} className="w-full flex-1" disabled={importDrafts.length === 0}>
               Importieren
             </Button>
           </div>

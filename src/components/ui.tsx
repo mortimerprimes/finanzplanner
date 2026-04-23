@@ -1,4 +1,4 @@
-import React, { useEffect, useRef, useState } from 'react';
+import React, { useEffect, useId, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import * as LucideIcons from 'lucide-react';
 
@@ -134,9 +134,9 @@ export function Button({
     ghost: 'hover:bg-slate-100 dark:hover:bg-gray-800 text-slate-600 dark:text-gray-400',
   };
   const sizes = {
-    sm: 'px-3 py-1.5 text-xs',
-    md: 'px-4 py-2 text-sm',
-    lg: 'px-5 py-2.5 text-base',
+    sm: 'min-h-10 px-3 py-2 text-xs',
+    md: 'min-h-11 px-4 py-2.5 text-sm',
+    lg: 'min-h-12 px-5 py-3 text-base',
   };
 
   return (
@@ -145,7 +145,7 @@ export function Button({
       onClick={onClick}
       disabled={disabled}
       className={`
-        inline-flex items-center justify-center gap-2 font-medium rounded-xl whitespace-nowrap shrink-0
+        inline-flex min-w-0 items-center justify-center gap-2 rounded-xl font-medium leading-5 text-center whitespace-normal sm:whitespace-nowrap
         transition-all duration-150 disabled:opacity-50 disabled:cursor-not-allowed
         ${variants[variant]} ${sizes[size]} ${className}
       `}
@@ -179,8 +179,8 @@ export function PageHeader({
   className = '',
 }: PageHeaderProps) {
   return (
-    <Card className={`p-5 sm:p-6 ${className}`}>
-      <div className="flex flex-col gap-4 xl:flex-row xl:items-start xl:justify-between">
+    <Card className={`p-4 sm:p-6 ${className}`}>
+      <div className="flex flex-col gap-4 lg:gap-5 xl:flex-row xl:items-start xl:justify-between">
         <div className="min-w-0 flex-1">
           {eyebrow && (
             <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-slate-400 dark:text-gray-500">{eyebrow}</p>
@@ -194,7 +194,7 @@ export function PageHeader({
         {(actions || aside) && (
           <div className="flex w-full flex-col gap-3 xl:w-auto xl:min-w-[240px] xl:items-end">
             {aside && <div className="w-full xl:w-auto">{aside}</div>}
-            {actions && <div className="flex flex-col gap-2 sm:flex-row sm:flex-wrap xl:justify-end">{actions}</div>}
+            {actions && <div className="grid w-full grid-cols-1 gap-2 sm:flex sm:flex-wrap xl:justify-end">{actions}</div>}
           </div>
         )}
       </div>
@@ -448,33 +448,51 @@ interface ModalProps {
 }
 
 export function Modal({ isOpen, onClose, title, children }: ModalProps) {
+  const titleId = useId();
+
   useEffect(() => {
     if (!isOpen) return;
 
     const previousOverflow = document.body.style.overflow;
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') {
+        onClose();
+      }
+    };
+
     document.body.style.overflow = 'hidden';
+    window.addEventListener('keydown', handleKeyDown);
     return () => {
       document.body.style.overflow = previousOverflow;
+      window.removeEventListener('keydown', handleKeyDown);
     };
-  }, [isOpen]);
+  }, [isOpen, onClose]);
 
   if (!isOpen) return null;
 
   return createPortal(
-    <div className="fixed inset-0 z-[120] isolate">
+    <div className="fixed inset-0 z-[120] isolate" role="presentation">
       <div className="absolute inset-0 bg-black/40 backdrop-blur-sm animate-overlay dark:bg-slate-950/70" onClick={onClose} />
-      <div className="relative flex min-h-full items-end justify-center overflow-y-auto px-3 pb-[calc(var(--safe-area-bottom)+0.75rem)] pt-[calc(var(--safe-area-top)+0.75rem)] sm:items-center sm:p-6">
-        <div className="relative mt-auto flex w-full max-w-lg flex-col overflow-hidden rounded-3xl border border-slate-200 bg-white shadow-2xl dark:border-gray-800 dark:bg-gray-900 animate-modal max-h-[calc(100dvh-var(--safe-area-top)-var(--safe-area-bottom)-1.5rem)] sm:my-6 sm:mt-0 sm:max-h-[calc(100dvh-3rem)]">
-          <div className="flex items-center justify-between gap-4 border-b border-slate-200 px-5 py-4 dark:border-gray-800 sm:px-6">
-            <h3 className="truncate text-lg font-semibold text-gray-900 dark:text-white">{title}</h3>
+      <div className="safe-x-mobile relative flex min-h-full items-end justify-center overflow-y-auto pb-[calc(var(--safe-area-bottom)+0.75rem)] pt-[calc(var(--safe-area-top)+0.75rem)] sm:items-center sm:p-6">
+        <div
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby={titleId}
+          className="relative mt-auto flex w-full max-w-lg flex-col overflow-hidden rounded-[1.75rem] border border-slate-200 bg-white shadow-2xl dark:border-gray-800 dark:bg-gray-900 animate-modal max-h-[calc(100dvh-var(--safe-area-top)-var(--safe-area-bottom)-1rem)] overscroll-contain sm:my-6 sm:mt-0 sm:max-h-[calc(100dvh-3rem)] sm:rounded-3xl"
+        >
+          <div className="flex justify-center pt-3 sm:hidden">
+            <span className="h-1.5 w-12 rounded-full bg-slate-200 dark:bg-gray-700" />
+          </div>
+          <div className="flex items-center justify-between gap-4 border-b border-slate-200 px-4 py-4 dark:border-gray-800 sm:px-6">
+            <h3 id={titleId} className="truncate text-lg font-semibold text-gray-900 dark:text-white">{title}</h3>
             <button
               onClick={onClose}
-              className="rounded-lg p-1.5 text-slate-400 transition-colors hover:bg-slate-100 dark:text-gray-500 dark:hover:bg-gray-800"
+              className="touch-target rounded-xl p-1.5 text-slate-400 transition-colors hover:bg-slate-100 dark:text-gray-500 dark:hover:bg-gray-800"
             >
               <LucideIcons.X size={18} />
             </button>
           </div>
-          <div className="overflow-y-auto px-5 py-5 pb-[calc(var(--safe-area-bottom)+1.25rem)] sm:px-6 sm:pb-6">
+          <div className="overflow-y-auto overscroll-contain px-4 py-5 pb-[calc(var(--safe-area-bottom)+1.25rem)] sm:px-6 sm:pb-6">
             {children}
           </div>
         </div>
@@ -504,12 +522,12 @@ export function EmptyState({ icon, title, description, action, secondaryAction, 
       <p className="text-sm text-slate-500 dark:text-gray-500 max-w-xs mb-5">{description}</p>
       {helpText && <p className="mb-5 max-w-sm text-xs leading-6 text-slate-500 dark:text-gray-400">{helpText}</p>}
       {(action || secondaryAction) && (
-        <div className="flex flex-col gap-2 sm:flex-row">
+        <div className="flex w-full flex-col gap-2 sm:w-auto sm:flex-row">
           {action && (
-            <Button onClick={action.onClick} icon="Plus">{action.label}</Button>
+            <Button onClick={action.onClick} icon="Plus" className="w-full sm:w-auto">{action.label}</Button>
           )}
           {secondaryAction && (
-            <Button variant="secondary" onClick={secondaryAction.onClick}>{secondaryAction.label}</Button>
+            <Button variant="secondary" onClick={secondaryAction.onClick} className="w-full sm:w-auto">{secondaryAction.label}</Button>
           )}
         </div>
       )}

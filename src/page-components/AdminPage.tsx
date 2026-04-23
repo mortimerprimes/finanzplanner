@@ -300,12 +300,12 @@ export function AdminPage() {
       </div>
 
       {/* Tab Switcher */}
-      <div className="flex gap-1 p-1 bg-slate-100 dark:bg-gray-800 rounded-2xl w-fit">
+      <div className="-mx-1 flex w-auto gap-1 overflow-x-auto rounded-2xl bg-slate-100 p-1 px-1 pb-1 dark:bg-gray-800 sm:mx-0 sm:w-fit">
         {tabs.map(tab => {
           const Icon = tab.icon;
           return (
             <button key={tab.id} onClick={() => setActiveTab(tab.id)}
-              className={`flex items-center gap-2 px-4 py-2 rounded-xl text-sm font-medium transition-all ${
+              className={`shrink-0 flex items-center gap-2 px-4 py-2 rounded-xl text-sm font-medium transition-all ${
                 activeTab === tab.id ? 'bg-white dark:bg-gray-900 text-gray-900 dark:text-white shadow-sm' : 'text-slate-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-300'
               }`}>
               <Icon size={15} />{tab.label}
@@ -324,7 +324,7 @@ export function AdminPage() {
           ) : stats ? (
             <>
               {/* 6 metric cards */}
-              <div className="grid grid-cols-2 lg:grid-cols-3 xl:grid-cols-6 gap-4">
+              <div className="grid grid-cols-1 min-[430px]:grid-cols-2 lg:grid-cols-3 xl:grid-cols-6 gap-4">
                 <StatCard label="Nutzer gesamt" value={stats.totalUsers} icon={Users} color="blue" />
                 <StatCard label="Diese Woche" value={stats.thisWeekRegistrations} icon={UserPlus} color="green"
                   sub={`Letzte Woche: ${stats.lastWeekRegistrations}`} trend={weekGrowth} />
@@ -337,7 +337,7 @@ export function AdminPage() {
 
               {/* Registration chart */}
               <div className="bg-white dark:bg-gray-900 rounded-2xl border border-slate-200 dark:border-gray-800 p-6">
-                <div className="flex items-center justify-between mb-4">
+                <div className="mb-4 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
                   <div>
                     <h3 className="font-semibold text-gray-900 dark:text-white">Registrierungen — letzte 30 Tage</h3>
                     <p className="text-xs text-slate-500 mt-0.5">Neue Nutzer pro Tag (blau = heute)</p>
@@ -393,7 +393,7 @@ export function AdminPage() {
                   </h3>
                   {stats.systemKeys && (
                     <>
-                      <div className="flex items-center gap-6 mb-4">
+                      <div className="mb-4 flex flex-col gap-6 sm:flex-row sm:items-center">
                         <DonutChart segments={[
                           { label: 'User Data', value: stats.systemKeys.userDataKeys, color: '#3b82f6' },
                           { label: 'Auth', value: stats.systemKeys.authKeys, color: '#f59e0b' },
@@ -445,10 +445,10 @@ export function AdminPage() {
               <input type="text" placeholder="Name oder E-Mail suchen..." value={search} onChange={e => setSearch(e.target.value)}
                 className="w-full rounded-xl border border-slate-200 dark:border-gray-700 bg-white dark:bg-gray-900 pl-10 pr-4 py-2.5 text-sm text-gray-900 dark:text-white placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-blue-500/40 transition-all" />
             </div>
-            <div className="flex gap-1 p-1 bg-slate-100 dark:bg-gray-800 rounded-xl">
+            <div className="-mx-1 flex gap-1 overflow-x-auto rounded-xl bg-slate-100 p-1 px-1 dark:bg-gray-800 sm:mx-0">
               {(['all', 'admin', 'locked', 'active'] as const).map(f => (
                 <button key={f} onClick={() => setUserFilter(f)}
-                  className={`px-3 py-1.5 rounded-lg text-xs font-medium transition-all ${userFilter === f ? 'bg-white dark:bg-gray-900 text-gray-900 dark:text-white shadow-sm' : 'text-slate-500 dark:text-gray-400'}`}>
+                  className={`shrink-0 px-3 py-1.5 rounded-lg text-xs font-medium transition-all ${userFilter === f ? 'bg-white dark:bg-gray-900 text-gray-900 dark:text-white shadow-sm' : 'text-slate-500 dark:text-gray-400'}`}>
                   {{ all: 'Alle', admin: 'Admins', locked: 'Gesperrt', active: 'Aktiv' }[f]}
                   <span className="ml-1 opacity-50 text-[10px]">
                     {f === 'all' ? users.length : f === 'admin' ? users.filter(u => u.role === 'admin').length : f === 'locked' ? users.filter(u => u.isLocked).length : users.filter(u => !u.isLocked).length}
@@ -695,8 +695,8 @@ export function AdminPage() {
 
       {/* ===== CONFIRM DIALOG ===== */}
       {confirmAction && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm">
-          <div className="bg-white dark:bg-gray-900 rounded-2xl border border-slate-200 dark:border-gray-800 p-6 max-w-sm w-full shadow-2xl">
+        <div className="fixed inset-0 z-50 flex items-end justify-center bg-black/60 p-0 backdrop-blur-sm sm:items-center sm:p-4">
+          <div className="w-full rounded-t-3xl border border-slate-200 bg-white p-5 pb-[calc(var(--safe-area-bottom)+1.25rem)] shadow-2xl dark:border-gray-800 dark:bg-gray-900 sm:max-w-sm sm:rounded-2xl sm:p-6">
             <div className="flex items-start gap-3 mb-4">
               <div className="p-2.5 rounded-xl bg-red-100 text-red-600 dark:bg-red-950/40 dark:text-red-400 flex-shrink-0 mt-0.5"><AlertTriangle size={20} /></div>
               <div>
@@ -704,7 +704,7 @@ export function AdminPage() {
                 <p className="text-sm text-slate-600 dark:text-gray-300 mt-1">{confirmAction.label}</p>
               </div>
             </div>
-            <div className="flex gap-3 mt-6">
+            <div className="mt-6 flex flex-col-reverse gap-3 sm:flex-row">
               <button onClick={() => setConfirmAction(null)} className="flex-1 px-4 py-2.5 rounded-xl border border-slate-200 dark:border-gray-700 text-sm font-medium text-gray-700 dark:text-gray-300 hover:bg-slate-50 dark:hover:bg-gray-800 transition-colors">Abbrechen</button>
               <button onClick={() => handleAction(confirmAction.userId, confirmAction.action)} className="flex-1 px-4 py-2.5 rounded-xl bg-red-600 text-white text-sm font-medium hover:bg-red-700 transition-colors">Bestätigen</button>
             </div>
@@ -714,8 +714,8 @@ export function AdminPage() {
 
       {/* ===== NEW PASSWORD MODAL ===== */}
       {newPassword && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm">
-          <div className="bg-white dark:bg-gray-900 rounded-2xl border border-slate-200 dark:border-gray-800 p-6 max-w-sm w-full shadow-2xl">
+        <div className="fixed inset-0 z-50 flex items-end justify-center bg-black/60 p-0 backdrop-blur-sm sm:items-center sm:p-4">
+          <div className="w-full rounded-t-3xl border border-slate-200 bg-white p-5 pb-[calc(var(--safe-area-bottom)+1.25rem)] shadow-2xl dark:border-gray-800 dark:bg-gray-900 sm:max-w-sm sm:rounded-2xl sm:p-6">
             <div className="flex items-center gap-3 mb-4">
               <div className="p-2.5 rounded-xl bg-blue-100 text-blue-600 dark:bg-blue-950/40 dark:text-blue-400"><KeyRound size={20} /></div>
               <h3 className="text-base font-bold text-gray-900 dark:text-white">Neues Passwort</h3>
@@ -741,7 +741,7 @@ export function AdminPage() {
 
       {/* ===== TOAST ===== */}
       {notification && (
-        <div className={`fixed bottom-6 right-6 z-50 flex items-center gap-3 px-4 py-3 rounded-2xl shadow-xl text-sm font-medium border ${
+        <div className={`fixed inset-x-4 bottom-[calc(var(--mobile-bottom-nav-height)+1rem)] z-50 flex items-center gap-3 rounded-2xl border px-4 py-3 text-sm font-medium shadow-xl sm:inset-x-auto sm:bottom-6 sm:right-6 ${
           notification.type === 'success' ? 'bg-white dark:bg-gray-900 text-green-700 dark:text-green-400 border-green-200 dark:border-green-900/40' : 'bg-white dark:bg-gray-900 text-red-700 dark:text-red-400 border-red-200 dark:border-red-900/40'
         }`}>
           {notification.type === 'success' ? <Check size={16} className="text-green-500" /> : <AlertTriangle size={16} className="text-red-500" />}

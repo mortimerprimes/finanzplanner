@@ -577,7 +577,7 @@ export function SettingsPage() {
           </>
         )}
         aside={(
-          <div className="inline-flex items-center gap-2 rounded-2xl border border-slate-200 bg-white px-4 py-2 text-sm dark:border-gray-800 dark:bg-gray-900">
+          <div className="inline-flex w-full items-center justify-center gap-2 rounded-2xl border border-slate-200 bg-white px-4 py-2 text-sm dark:border-gray-800 dark:bg-gray-900 sm:w-auto sm:justify-start">
             <ShieldCheck size={16} className="text-emerald-500" />
             <span className="font-medium text-gray-900 dark:text-white">{providerLabel} als Backup-Ziel</span>
           </div>
@@ -605,7 +605,7 @@ export function SettingsPage() {
               Nutze Alltag fuer Bedienung und Hinweise, Oberflaeche fuer Navigation und Dashboard, Automationen fuer Erinnerungen und AI, Daten fuer Export und Backups.
             </p>
           </div>
-          <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 xl:min-w-[520px] xl:grid-cols-4">
+          <div className="grid w-full grid-cols-1 gap-3 min-[430px]:grid-cols-2 xl:min-w-[520px] xl:grid-cols-4">
             {quickAccessCards.map((item) => (
               <button
                 key={item.id}
@@ -626,13 +626,13 @@ export function SettingsPage() {
         </div>
       </Card>
 
-      <div className="flex flex-wrap gap-2">
+      <div className="-mx-1 flex gap-2 overflow-x-auto px-1 pb-1 sm:mx-0 sm:flex-wrap sm:px-0">
         {settingsTabs.map((item) => (
           <button
             key={item.id}
             type="button"
             onClick={() => setSettingsSection(item.id)}
-            className={`rounded-full px-4 py-2 text-sm font-semibold transition-colors ${
+            className={`shrink-0 rounded-full px-4 py-2 text-sm font-semibold transition-colors ${
               settingsSection === item.id
                 ? 'bg-slate-900 text-white dark:bg-white dark:text-gray-900'
                 : 'bg-white text-slate-600 hover:bg-slate-100 dark:bg-gray-900 dark:text-gray-300 dark:hover:bg-gray-800'

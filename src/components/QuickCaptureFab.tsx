@@ -274,7 +274,7 @@ export function QuickCaptureFab({ desktopOnly = false }: { desktopOnly?: boolean
     <>
       <button
         onClick={() => setIsOpen(true)}
-        className={`fixed bottom-[calc(6.75rem+var(--safe-area-bottom))] right-4 z-[80] inline-flex h-14 w-14 items-center justify-center rounded-full bg-blue-600 text-white shadow-xl shadow-blue-600/30 transition-all hover:scale-105 hover:bg-blue-700 md:bottom-[calc(6.25rem+var(--safe-area-bottom))] sm:right-6 lg:bottom-6 lg:right-6 ${desktopOnly ? 'hidden lg:inline-flex' : ''}`}
+        className={`fixed bottom-[calc(var(--mobile-bottom-nav-height)+1rem)] right-4 z-[80] inline-flex h-14 w-14 items-center justify-center rounded-full bg-blue-600 text-white shadow-xl shadow-blue-600/30 transition-all hover:scale-105 hover:bg-blue-700 sm:right-6 lg:bottom-6 lg:right-6 ${desktopOnly ? 'hidden lg:inline-flex' : ''}`}
         aria-label="Schnellerfassung öffnen"
       >
         <Plus size={24} />
@@ -320,21 +320,23 @@ export function QuickCaptureFab({ desktopOnly = false }: { desktopOnly?: boolean
 
           {(captureType === 'expense' || captureType === 'income') && (
             <>
-              <div className="flex gap-2">
+              <div className="grid grid-cols-2 gap-2">
                 <label
                   title="Bild auswählen"
-                  className="inline-flex min-h-10 cursor-pointer items-center justify-center rounded-xl border border-slate-200 px-3 text-sm font-medium text-gray-900 transition-colors hover:bg-slate-50 dark:border-gray-700 dark:text-white dark:hover:bg-gray-800"
+                  className="inline-flex min-h-11 cursor-pointer items-center justify-center gap-2 rounded-2xl border border-slate-200 px-3 text-sm font-medium text-gray-900 transition-colors hover:bg-slate-50 dark:border-gray-700 dark:text-white dark:hover:bg-gray-800"
                 >
-                  <Camera size={15} />
+                  <Camera size={16} />
+                  Scan oder Datei
                   <input type="file" accept="image/*,.pdf" onChange={onAttachmentChange} className="sr-only" />
                 </label>
                 <button
                   title="Sprache aufnehmen"
                   onClick={startVoiceCapture}
                   disabled={aiLoading}
-                  className="inline-flex min-h-10 items-center justify-center rounded-xl border border-slate-200 px-3 text-sm font-medium text-gray-900 transition-colors hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-50 dark:border-gray-700 dark:text-white dark:hover:bg-gray-800"
+                  className="inline-flex min-h-11 items-center justify-center gap-2 rounded-2xl border border-slate-200 px-3 text-sm font-medium text-gray-900 transition-colors hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-50 dark:border-gray-700 dark:text-white dark:hover:bg-gray-800"
                 >
-                  <Mic size={15} />
+                  <Mic size={16} />
+                  Sprache
                 </button>
               </div>
               {aiError && <p className="text-xs font-medium text-red-600 dark:text-red-400">{aiError}</p>}
@@ -372,9 +374,9 @@ export function QuickCaptureFab({ desktopOnly = false }: { desktopOnly?: boolean
 
           <Input label="Notiz" value={note} onChange={setNote} placeholder="Optional" />
 
-          <div className="flex gap-3 pt-2">
-            <Button variant="secondary" onClick={closeModal} className="flex-1">Abbrechen</Button>
-            <Button onClick={handleSave} className="flex-1">Sofort speichern</Button>
+          <div className="flex flex-col-reverse gap-3 pt-2 sm:flex-row">
+            <Button variant="secondary" onClick={closeModal} className="w-full flex-1">Abbrechen</Button>
+            <Button onClick={handleSave} className="w-full flex-1">Sofort speichern</Button>
           </div>
         </div>
       </Modal>

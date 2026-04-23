@@ -692,12 +692,12 @@ export function ExpensesPage() {
       )}
 
       {categoryBreakdown.length > 0 && (
-        <div className="flex gap-2 overflow-x-auto px-1 pb-1">
+        <div className="-mx-1 flex gap-2 overflow-x-auto px-1 pb-1 snap-x snap-mandatory">
           {categoryBreakdown.map((item) => (
             <button
               key={item.key}
               onClick={() => setFilterCategory(filterCategory === item.key ? 'all' : item.key)}
-              className={`flex shrink-0 items-center gap-2 rounded-xl border px-3 py-2 text-xs font-medium transition-all ${
+              className={`snap-start flex shrink-0 items-center gap-2 rounded-xl border px-3 py-2 text-xs font-medium transition-all ${
                 filterCategory === item.key
                   ? 'border-blue-300 bg-blue-50 text-blue-700 dark:border-blue-700 dark:bg-blue-950/30 dark:text-blue-300'
                   : 'border-slate-200 bg-white text-gray-700 dark:border-gray-800 dark:bg-gray-900 dark:text-gray-300'
@@ -816,15 +816,20 @@ export function ExpensesPage() {
               )}
               {selectedIds.size > 0 && (
                 <>
-                  <Select value={batchCategory} onChange={setBatchCategory} options={[{ value: '', label: 'Kategorie ändern...' }, ...categoryOptions]} />
+                  <Select
+                    value={batchCategory}
+                    onChange={setBatchCategory}
+                    options={[{ value: '', label: 'Kategorie ändern...' }, ...categoryOptions]}
+                    className="w-full sm:min-w-[240px] sm:flex-1"
+                  />
                   {batchCategory && (
-                    <Button size="sm" onClick={handleBatchCategoryChange}>Anwenden</Button>
+                    <Button size="sm" onClick={handleBatchCategoryChange} className="w-full sm:w-auto">Anwenden</Button>
                   )}
-                  <Button size="sm" variant="danger" onClick={handleBatchDelete}>Löschen</Button>
+                  <Button size="sm" variant="danger" onClick={handleBatchDelete} className="w-full sm:w-auto">Löschen</Button>
                   <button onClick={() => setSelectedIds(new Set())} className="text-xs text-slate-500 hover:text-slate-700 dark:text-gray-400">Auswahl aufheben</button>
                 </>
               )}
-              <button onClick={toggleSelectionMode} className="ml-auto text-xs font-medium text-slate-500 hover:text-slate-700 dark:text-gray-400">
+              <button onClick={toggleSelectionMode} className="w-full text-left text-xs font-medium text-slate-500 hover:text-slate-700 dark:text-gray-400 sm:ml-auto sm:w-auto sm:text-right">
                 Auswahlmodus beenden
               </button>
             </Card>
@@ -893,7 +898,7 @@ export function ExpensesPage() {
                             </div>
                           </div>
 
-                          <div className="flex items-center justify-between gap-3 lg:justify-end">
+                          <div className="flex w-full flex-wrap items-center gap-3 lg:w-auto lg:justify-end">
                             <div className="flex items-center gap-2">
                               {budgetStatus.isWarning && (
                                 <div className="inline-flex items-center gap-1 rounded-full bg-amber-50 px-2 py-1 text-[11px] font-semibold text-amber-700 dark:bg-amber-950/30 dark:text-amber-300">
@@ -903,14 +908,16 @@ export function ExpensesPage() {
                               )}
                               {expense.isRecurring && <Repeat size={14} className="text-violet-500" />}
                             </div>
-                            <p className="text-base font-bold text-red-600 dark:text-red-400">-{formatCurrency(expense.amount, settings)}</p>
-                            <div className="flex gap-1">
-                              <button onClick={() => openModal(expense)} className="rounded-lg p-1.5 transition-colors hover:bg-slate-100 dark:hover:bg-gray-800">
-                                <Pencil size={15} className="text-slate-400" />
-                              </button>
-                              <button onClick={() => handleDelete(expense.id)} className="rounded-lg p-1.5 transition-colors hover:bg-red-50 dark:hover:bg-red-950/30">
-                                <Trash2 size={15} className="text-red-400" />
-                              </button>
+                            <div className="ml-auto flex items-center gap-3">
+                              <p className="text-base font-bold text-red-600 dark:text-red-400">-{formatCurrency(expense.amount, settings)}</p>
+                              <div className="flex gap-1">
+                                <button onClick={() => openModal(expense)} className="rounded-lg p-1.5 transition-colors hover:bg-slate-100 dark:hover:bg-gray-800">
+                                  <Pencil size={15} className="text-slate-400" />
+                                </button>
+                                <button onClick={() => handleDelete(expense.id)} className="rounded-lg p-1.5 transition-colors hover:bg-red-50 dark:hover:bg-red-950/30">
+                                  <Trash2 size={15} className="text-red-400" />
+                                </button>
+                              </div>
                             </div>
                           </div>
                         </div>
@@ -978,9 +985,9 @@ export function ExpensesPage() {
               <p className="mt-1 text-xs text-amber-600 dark:text-amber-400">Nochmal klicken um trotzdem zu speichern.</p>
             </div>
           )}
-          <div className="flex gap-3 pt-2">
-            <Button variant="secondary" onClick={closeModal} className="flex-1">Abbrechen</Button>
-            <Button onClick={handleSubmit} className="flex-1">{editingExpense ? 'Speichern' : 'Hinzufügen'}</Button>
+          <div className="flex flex-col-reverse gap-3 pt-2 sm:flex-row">
+            <Button variant="secondary" onClick={closeModal} className="w-full flex-1">Abbrechen</Button>
+            <Button onClick={handleSubmit} className="w-full flex-1">{editingExpense ? 'Speichern' : 'Hinzufügen'}</Button>
           </div>
         </div>
       </Modal>
@@ -1021,9 +1028,9 @@ export function ExpensesPage() {
 
           {receiptError && <p className="text-sm font-medium text-red-600 dark:text-red-400">{receiptError}</p>}
 
-          <div className="flex gap-3">
-            <Button variant="secondary" onClick={() => { setReceiptModalOpen(false); resetReceiptFlow(); }} className="flex-1">Schließen</Button>
-            <Button onClick={handleAnalyzeReceipt} className="flex-1" disabled={receiptLoading}>
+          <div className="flex flex-col-reverse gap-3 sm:flex-row">
+            <Button variant="secondary" onClick={() => { setReceiptModalOpen(false); resetReceiptFlow(); }} className="w-full flex-1">Schließen</Button>
+            <Button onClick={handleAnalyzeReceipt} className="w-full flex-1" disabled={receiptLoading}>
               {receiptLoading ? <span className="inline-flex items-center gap-2"><LoaderCircle size={16} className="animate-spin" /> Analysiere...</span> : 'Analyse starten'}
             </Button>
           </div>
@@ -1080,9 +1087,9 @@ export function ExpensesPage() {
 
           {voiceError && <p className="text-sm font-medium text-red-600 dark:text-red-400">{voiceError}</p>}
 
-          <div className="flex gap-3">
-            <Button variant="secondary" onClick={() => { setVoiceModalOpen(false); resetVoiceFlow(); }} className="flex-1">Schließen</Button>
-            <Button onClick={handleParseVoiceTranscript} className="flex-1" disabled={voiceLoading}>
+          <div className="flex flex-col-reverse gap-3 sm:flex-row">
+            <Button variant="secondary" onClick={() => { setVoiceModalOpen(false); resetVoiceFlow(); }} className="w-full flex-1">Schließen</Button>
+            <Button onClick={handleParseVoiceTranscript} className="w-full flex-1" disabled={voiceLoading}>
               {voiceLoading ? <span className="inline-flex items-center gap-2"><LoaderCircle size={16} className="animate-spin" /> Verarbeite...</span> : 'In Buchungen umwandeln'}
             </Button>
           </div>
