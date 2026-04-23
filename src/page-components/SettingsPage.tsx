@@ -1127,7 +1127,7 @@ export function SettingsPage() {
             <Icon name="BellRing" size={16} className="text-emerald-500" /> Erinnerungen & Alerts
           </h3>
           <div className="space-y-3">
-            <SettingSwitch title="Budget-Warnungen" description="Meldet frühzeitig, wenn dein Monatsbudget knapp wird." checked={settings.notifications.budgetWarnings} onChange={(value) => updateNotification('budgetWarnings', value)} />
+            <SettingSwitch title="Budget-Warnungen" description="Meldet frühzeitig, wenn dein Monatsbudget knapp wird, und zeigt nach neuen Ausgaben direkt dein Restbudget." checked={settings.notifications.budgetWarnings} onChange={(value) => updateNotification('budgetWarnings', value)} />
             <SettingSwitch title="Rechnungs-Erinnerungen" description="Praktisch für Fixkosten und Fälligkeitstage." checked={settings.notifications.billReminders} onChange={(value) => updateNotification('billReminders', value)} />
             <SettingSwitch title="Sparziel-Impulse" description="Benachrichtigt bei Meilensteinen und Rückstand." checked={settings.notifications.savingsGoals} onChange={(value) => updateNotification('savingsGoals', value)} />
             <SettingSwitch title="Monatsbericht bereit" description="Meldet zum Monatswechsel, dass der Bericht des letzten abgeschlossenen Monats fertig ist." checked={settings.notifications.monthlyReport} onChange={(value) => updateNotification('monthlyReport', value)} />

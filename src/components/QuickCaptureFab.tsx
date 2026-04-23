@@ -4,6 +4,7 @@ import { ChangeEvent, useEffect, useState } from 'react';
 import { Camera, Mic, Plus, Receipt, TrendingUp, Wallet } from 'lucide-react';
 import { useFinance } from '@/lib/finance-context';
 import { Button, Input, Modal, Select } from './ui';
+import { emitExpenseBudgetFeedback } from '../utils/budgetFeedback';
 import { FIXED_EXPENSE_CATEGORIES, INCOME_TYPES } from '../utils/constants';
 import { getExpenseCategoryMap, parseTags } from '../utils/helpers';
 import { analyzeReceiptWithAI, parseSpeechExpenses } from '../services/ai';
@@ -103,6 +104,13 @@ export function QuickCaptureFab() {
 
     if (captureType === 'expense') {
       const parsedTags = parseTags(tags);
+      emitExpenseBudgetFeedback({
+        description: name,
+        amount: parseFloat(amount),
+        category: expenseCategory,
+        date,
+        month: date.slice(0, 7),
+      });
       dispatch({
         type: 'ADD_EXPENSE',
         payload: {

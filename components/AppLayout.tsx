@@ -20,6 +20,7 @@ import { useNotificationEngine } from '@/src/hooks/useNotifications';
 import { GlobalSearch } from '@/src/components/GlobalSearch';
 import { useKeyboardShortcuts, KeyboardShortcutsHelp } from '@/src/hooks/useKeyboardShortcuts';
 import { useSession } from 'next-auth/react';
+import { BudgetFeedbackToast } from '@/src/components/BudgetFeedbackToast';
 import { OnboardingWizard } from '@/src/components/OnboardingWizard';
 
 interface NavItem {
@@ -647,6 +648,7 @@ export function AppLayout({ children }: { children: React.ReactNode }) {
       </Modal>
 
       {!isSettingsPage && <QuickCaptureFab />}
+      {!isSettingsPage && <BudgetFeedbackToast />}
       {shortcutsHintOpen && (
         <div className="fixed inset-x-4 bottom-[calc(6.75rem+var(--safe-area-bottom))] z-[90] mx-auto max-w-md rounded-3xl border border-slate-200 bg-white p-4 shadow-2xl dark:border-gray-800 dark:bg-gray-900 sm:left-auto sm:right-6 sm:mx-0 sm:w-[360px] sm:bottom-6">
           <div className="flex items-start justify-between gap-4">

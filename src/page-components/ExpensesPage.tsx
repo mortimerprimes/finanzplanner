@@ -26,6 +26,7 @@ import {
   parseTags,
   findDuplicateExpenses,
 } from '../utils/helpers';
+import { emitExpenseBudgetFeedback } from '../utils/budgetFeedback';
 import { focusElementById, getSearchFocus } from '../utils/searchFocus';
 import { Expense, ExpenseAttachment, ExpenseCategory } from '../types';
 
@@ -233,6 +234,17 @@ export function ExpensesPage() {
     const selected = suggestions.filter((suggestion) => suggestion.selected);
     if (selected.length === 0) return;
 
+    if (selected.length === 1) {
+      const firstSuggestion = selected[0];
+      emitExpenseBudgetFeedback({
+        description: firstSuggestion.description,
+        amount: firstSuggestion.amount,
+        category: firstSuggestion.category,
+        date: firstSuggestion.date,
+        month: firstSuggestion.date.slice(0, 7),
+      });
+    }
+
     selected.forEach((suggestion) => {
       dispatch({
         type: 'ADD_EXPENSE',
@@ -355,6 +367,7 @@ export function ExpensesPage() {
     if (editingExpense) {
       dispatch({ type: 'UPDATE_EXPENSE', payload: { ...editingExpense, ...payload } });
     } else {
+      emitExpenseBudgetFeedback(payload);
       dispatch({ type: 'ADD_EXPENSE', payload });
     }
 
