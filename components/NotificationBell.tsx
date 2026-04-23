@@ -1,6 +1,7 @@
 'use client';
 
 import { useState, useRef, useEffect } from 'react';
+import Link from 'next/link';
 import { Bell, X, Check, Trash2 } from 'lucide-react';
 import { useFinance } from '@/lib/finance-context';
 import { Icon } from '@/src/components/ui';
@@ -101,9 +102,30 @@ export function NotificationBell() {
                       <Icon name={n.icon || 'Bell'} size={16} color={n.color || '#6366f1'} />
                     </div>
                     <div className="min-w-0 flex-1">
-                      <p className="text-sm font-semibold text-gray-900 dark:text-white">{n.title}</p>
+                      {n.href ? (
+                        <Link
+                          href={n.href}
+                          onClick={() => setOpen(false)}
+                          className="text-sm font-semibold text-gray-900 transition-colors hover:text-blue-600 dark:text-white dark:hover:text-blue-400"
+                        >
+                          {n.title}
+                        </Link>
+                      ) : (
+                        <p className="text-sm font-semibold text-gray-900 dark:text-white">{n.title}</p>
+                      )}
                       <p className="mt-0.5 text-xs text-slate-500 dark:text-gray-400">{n.message}</p>
-                      <p className="mt-1 text-[10px] text-slate-400 dark:text-gray-600">{timeAgo(n.createdAt)}</p>
+                      <div className="mt-1 flex items-center gap-2">
+                        <p className="text-[10px] text-slate-400 dark:text-gray-600">{timeAgo(n.createdAt)}</p>
+                        {n.href && (
+                          <Link
+                            href={n.href}
+                            onClick={() => setOpen(false)}
+                            className="text-[10px] font-semibold text-blue-600 hover:text-blue-500 dark:text-blue-400 dark:hover:text-blue-300"
+                          >
+                            Bericht öffnen
+                          </Link>
+                        )}
+                      </div>
                     </div>
                     <button
                       onClick={() => dispatch({ type: 'DISMISS_NOTIFICATION', payload: n.id })}

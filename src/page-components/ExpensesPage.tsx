@@ -1,4 +1,5 @@
 import { ChangeEvent, useEffect, useMemo, useRef, useState } from 'react';
+import { useSearchParams } from 'next/navigation';
 import {
   Camera,
   ChevronDown,
@@ -25,6 +26,7 @@ import {
   parseTags,
   findDuplicateExpenses,
 } from '../utils/helpers';
+import { focusElementById, getSearchFocus } from '../utils/searchFocus';
 import { Expense, ExpenseAttachment, ExpenseCategory } from '../types';
 
 interface BrowserSpeechRecognitionAlternative {
@@ -76,6 +78,9 @@ export function ExpensesPage() {
   const { state, dispatch } = useFinance();
   const { expenses, settings, currentMonth, selectedMonth, budgetLimits, accounts } = state;
   const recognitionRef = useRef<BrowserSpeechRecognition | null>(null);
+  const lastSearchFocusRef = useRef('');
+  const searchParams = useSearchParams();
+  const expenseFocus = getSearchFocus(searchParams, 'expense');
 
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [receiptModalOpen, setReceiptModalOpen] = useState(false);
@@ -95,6 +100,7 @@ export function ExpensesPage() {
   }, [selectedMonth]);
   const [maxAmount, setMaxAmount] = useState('');
   const [warningsOnly, setWarningsOnly] = useState(false);
+  const [highlightedExpenseId, setHighlightedExpenseId] = useState<string | null>(null);
 
   const [description, setDescription] = useState('');
   const [amount, setAmount] = useState('');
@@ -148,6 +154,46 @@ export function ExpensesPage() {
 
   // Duplicate warning state
   const [duplicateWarning, setDuplicateWarning] = useState<string>('');
+
+  useEffect(() => {
+    if (!expenseFocus) return;
+
+    const signature = `${expenseFocus.id}:${expenseFocus.month || ''}`;
+    if (lastSearchFocusRef.current === signature) return;
+
+    setSearch('');
+    setFilterCategory('all');
+    setFilterAccount('all');
+    setFilterRecurring('all');
+    setFiltersOpen(false);
+    setMinAmount('');
+    setMaxAmount('');
+    setWarningsOnly(false);
+    setSelectedIds(new Set());
+
+    if (expenseFocus.month) {
+      setFilterMonth(expenseFocus.month);
+      if (selectedMonth !== expenseFocus.month) {
+        dispatch({ type: 'SET_SELECTED_MONTH', payload: expenseFocus.month });
+      }
+    }
+
+    let clearHighlightTimeout: number | undefined;
+    const cleanupFocus = focusElementById(`expense-${expenseFocus.id}`, () => {
+      lastSearchFocusRef.current = signature;
+      setHighlightedExpenseId(expenseFocus.id);
+      clearHighlightTimeout = window.setTimeout(() => {
+        setHighlightedExpenseId((current) => current === expenseFocus.id ? null : current);
+      }, 2600);
+    });
+
+    return () => {
+      cleanupFocus();
+      if (clearHighlightTimeout) {
+        window.clearTimeout(clearHighlightTimeout);
+      }
+    };
+  }, [dispatch, expenseFocus?.id, expenseFocus?.month, selectedMonth]);
 
   const categoryOptions = Object.entries(categoryMap).map(([value, info]) => ({ value, label: info.labelDe }));
   const aiCategoryOptions = Object.entries(categoryMap).map(([value, info]) => ({ id: value, label: info.labelDe }));
@@ -707,7 +753,11 @@ export function ExpensesPage() {
                     const budgetStatus = calculateBudgetStatus(expense, expenses, budgetLimits, settings.budgetWarningThreshold);
                     const account = accounts.find((item) => item.id === expense.accountId);
                     return (
-                      <Card key={expense.id} className="p-4">
+                      <Card
+                        key={expense.id}
+                        id={`expense-${expense.id}`}
+                        className={`scroll-mt-28 p-4 ${highlightedExpenseId === expense.id ? 'ring-2 ring-blue-500 ring-offset-2 ring-offset-slate-50 bg-blue-50/40 dark:bg-blue-950/20 dark:ring-offset-gray-950' : ''}`}
+                      >
                         <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
                           <div className="flex min-w-0 items-start gap-3">
                             <input

@@ -317,6 +317,7 @@ export interface Settings {
     budgetWarnings: boolean;
     billReminders: boolean;
     savingsGoals: boolean;
+    monthlyReport: boolean;
   };
   // Freelance earning limit (yearly tax threshold)
   freelanceYearlyLimit?: number;
@@ -326,6 +327,13 @@ export interface Settings {
   emailReportFrequency?: 'none' | 'weekly' | 'monthly';
   // Sidebar menu visibility - hrefs of hidden menu items
   hiddenMenuItems?: string[];
+  userExperience: {
+    onboardingCompleted: boolean;
+    initialSetupCompleted: boolean;
+    shortcutsHintSeen: boolean;
+    mode: 'guided' | 'standard' | 'power';
+    profile: 'personal' | 'freelance' | 'complete';
+  };
 }
 
 // Bank Sync
@@ -505,13 +513,14 @@ export interface NetWorthSnapshot {
 }
 
 // In-App Benachrichtigungen
-export type NotificationType = 'budget-warning' | 'bill-reminder' | 'savings-milestone' | 'debt-info' | 'general';
+export type NotificationType = 'budget-warning' | 'bill-reminder' | 'savings-milestone' | 'debt-info' | 'monthly-report' | 'general';
 
 export interface AppNotification {
   id: string;
   type: NotificationType;
   title: string;
   message: string;
+  href?: string;
   icon?: string;
   color?: string;
   read: boolean;

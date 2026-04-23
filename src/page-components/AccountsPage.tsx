@@ -414,7 +414,9 @@ export function AccountsPage() {
               icon="WalletCards"
               title="Noch keine Konten"
               description="Lege Konten an, um Assets und Nettovermögen sichtbar zu machen."
+              helpText="Starte mit deinem wichtigsten Alltagskonto. Danach funktionieren Dashboard, Schnellbuchung und Kontoauszug-Import deutlich einfacher."
               action={{ label: 'Erstes Konto anlegen', onClick: () => openAccountModal() }}
+              secondaryAction={{ label: 'Geführtes Setup', onClick: () => window.dispatchEvent(new CustomEvent('open-onboarding')) }}
             />
           ) : (
             <div className="space-y-3">

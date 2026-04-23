@@ -915,6 +915,7 @@ export interface SearchResult {
   subtitle: string;
   amount?: number;
   date?: string;
+  contextMonth?: string;
   icon: string;
   color: string;
 }
@@ -923,7 +924,7 @@ export const globalSearch = (
   query: string,
   state: {
     expenses: { id: string; description: string; amount: number; date: string; category: string; tags?: string[]; note?: string }[];
-    incomes: { id: string; name: string; amount: number; month?: string }[];
+    incomes: { id: string; name: string; amount: number; month?: string; date?: string; startMonth?: string; effectiveFromMonth?: string; createdAt?: string }[];
     fixedExpenses: { id: string; name: string; amount: number; category: string }[];
     debts: { id: string; name: string; remainingAmount: number; totalAmount: number }[];
     savingsGoals: { id: string; name: string; currentAmount: number; targetAmount: number }[];
@@ -940,12 +941,13 @@ export const globalSearch = (
   for (const e of state.expenses) {
     if (e.description.toLowerCase().includes(q) || e.tags?.some(t => t.toLowerCase().includes(q)) || e.note?.toLowerCase().includes(q)) {
       const info = getExpenseCategoryInfo(e.category, state.settings);
-      results.push({ type: 'expense', id: e.id, title: e.description, subtitle: `${formatCurrency(e.amount, state.settings)} · ${e.date}`, amount: e.amount, date: e.date, icon: info.icon, color: info.color });
+      results.push({ type: 'expense', id: e.id, title: e.description, subtitle: `${formatCurrency(e.amount, state.settings)} · ${e.date}`, amount: e.amount, date: e.date, contextMonth: e.date.slice(0, 7), icon: info.icon, color: info.color });
     }
   }
   for (const i of state.incomes) {
     if (i.name.toLowerCase().includes(q)) {
-      results.push({ type: 'income', id: i.id, title: i.name, subtitle: formatCurrency(i.amount, state.settings), amount: i.amount, date: i.month, icon: 'TrendingUp', color: '#10b981' });
+      const contextMonth = i.month || i.date?.slice(0, 7) || i.effectiveFromMonth || i.startMonth || i.createdAt?.slice(0, 7);
+      results.push({ type: 'income', id: i.id, title: i.name, subtitle: formatCurrency(i.amount, state.settings), amount: i.amount, date: i.month, contextMonth, icon: 'TrendingUp', color: '#10b981' });
     }
   }
   for (const f of state.fixedExpenses) {

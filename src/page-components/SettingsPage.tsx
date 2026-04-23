@@ -8,6 +8,7 @@ import autoTable from 'jspdf-autotable';
 import { useFinance } from '@/lib/finance-context';
 import { useTheme } from '../hooks/useTheme';
 import { Badge, Button, Card, Icon, Input, Select, Toggle } from '../components/ui';
+import { HelpTooltip } from '../components/HelpTooltip';
 import { AI_ENDPOINT_PRESETS, AI_PROVIDER_DEFAULTS, AI_PROVIDER_OPTIONS, CURRENCIES, DASHBOARD_WIDGET_OPTIONS, DEFAULT_SETTINGS, UI_COLORS } from '../utils/constants';
 import { fetchAvailableModels, testAIConnection } from '../services/ai';
 import {
@@ -86,11 +87,28 @@ export function SettingsPage() {
   const [aiStatusTone, setAIStatusTone] = useState<'success' | 'error'>('success');
   const [aiTesting, setAITesting] = useState(false);
   const [showApiKey, setShowApiKey] = useState(false);
+  const [settingsSection, setSettingsSection] = useState<'basics' | 'workspace' | 'automation' | 'data'>('basics');
+  const [browserNotificationPermission, setBrowserNotificationPermission] = useState<NotificationPermission | 'unsupported'>('unsupported');
 
   const flash = (message: string) => {
     setShowSuccess(message);
     window.setTimeout(() => setShowSuccess(''), 2500);
   };
+
+  useEffect(() => {
+    const refreshNotificationPermission = () => {
+      if (typeof window === 'undefined' || typeof Notification === 'undefined') {
+        setBrowserNotificationPermission('unsupported');
+        return;
+      }
+
+      setBrowserNotificationPermission(Notification.permission);
+    };
+
+    refreshNotificationPermission();
+    window.addEventListener('focus', refreshNotificationPermission);
+    return () => window.removeEventListener('focus', refreshNotificationPermission);
+  }, []);
 
   const updateSetting = <K extends keyof Settings>(key: K, value: Settings[K]) => {
     dispatch({ type: 'UPDATE_SETTINGS', payload: { [key]: value } });
@@ -106,6 +124,52 @@ export function SettingsPage() {
         },
       },
     });
+  };
+
+  const requestSystemNotificationPermission = async () => {
+    if (typeof window === 'undefined' || typeof Notification === 'undefined') {
+      flash('Dieser Browser unterstuetzt keine System-Benachrichtigungen.');
+      setBrowserNotificationPermission('unsupported');
+      return;
+    }
+
+    if (Notification.permission === 'denied') {
+      setBrowserNotificationPermission('denied');
+      flash('Benachrichtigungen sind blockiert. Aktiviere sie bitte in den Browser- oder Systemeinstellungen.');
+      return;
+    }
+
+    const permission = await Notification.requestPermission();
+    setBrowserNotificationPermission(permission);
+
+    if (permission === 'granted') {
+      flash('System-Benachrichtigungen wurden aktiviert.');
+      return;
+    }
+
+    flash('System-Benachrichtigungen wurden nicht freigegeben.');
+  };
+
+  const sendSystemNotificationTest = () => {
+    if (typeof window === 'undefined' || typeof Notification === 'undefined') {
+      flash('Dieser Browser unterstuetzt keine System-Benachrichtigungen.');
+      return;
+    }
+
+    if (Notification.permission !== 'granted') {
+      flash('Bitte erteile zuerst die Berechtigung fuer System-Benachrichtigungen.');
+      return;
+    }
+
+    const notification = new Notification('Finanzplanner', {
+      body: 'System-Benachrichtigungen sind aktiv. Der Monatsbericht meldet sich zum Monatswechsel automatisch.',
+      icon: '/icons/icon-192.svg',
+    });
+    notification.onclick = () => {
+      window.focus();
+      notification.close();
+    };
+    flash('Test-Benachrichtigung gesendet.');
   };
 
   const updateAISetting = useCallback(<K extends keyof Settings['ai']>(key: K, value: Settings['ai'][K]) => {
@@ -458,10 +522,38 @@ export function SettingsPage() {
         </div>
       )}
 
+      <div className="flex flex-wrap gap-2">
+        {[
+          { id: 'basics', label: 'Basis' },
+          { id: 'workspace', label: 'Personalisierung' },
+          { id: 'automation', label: 'Automatisierung' },
+          { id: 'data', label: 'Daten & Export' },
+        ].map((item) => (
+          <button
+            key={item.id}
+            type="button"
+            onClick={() => setSettingsSection(item.id as typeof settingsSection)}
+            className={`rounded-full px-4 py-2 text-sm font-semibold transition-colors ${
+              settingsSection === item.id
+                ? 'bg-slate-900 text-white dark:bg-white dark:text-gray-900'
+                : 'bg-white text-slate-600 hover:bg-slate-100 dark:bg-gray-900 dark:text-gray-300 dark:hover:bg-gray-800'
+            }`}
+          >
+            {item.label}
+          </button>
+        ))}
+      </div>
+
+      {settingsSection === 'basics' && (
       <div className="grid grid-cols-1 gap-4 xl:grid-cols-[1.2fr_1fr]">
         <Card className="p-5">
           <h3 className="mb-4 flex items-center gap-2 text-sm font-bold text-gray-900 dark:text-white">
             <Icon name="SlidersHorizontal" size={16} className="text-blue-500" /> Erlebnis & Bedienung
+            <HelpTooltip
+              title="Weniger Reibung im Alltag"
+              description="Hier steuerst du, wie reduziert oder umfangreich die App auftritt. Der geführte Modus blendet fortgeschrittene Bereiche standardmäßig aus."
+              example="Beispiel: Für Privatnutzung reicht oft Profil Privat + Modus Geführt."
+            />
           </h3>
           <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
             <Select
@@ -510,6 +602,48 @@ export function SettingsPage() {
                 { value: '12', label: '12 Monate' },
               ]}
             />
+            <Select
+              label="Bedienmodus"
+              value={settings.userExperience.mode}
+              onChange={(value) => updateSetting('userExperience', { ...settings.userExperience, mode: value as Settings['userExperience']['mode'] })}
+              options={[
+                { value: 'guided', label: 'Geführt – reduziert & einsteigerfreundlich' },
+                { value: 'standard', label: 'Standard – ausgewogen' },
+                { value: 'power', label: 'Power – alle Bereiche sichtbar' },
+              ]}
+            />
+            <Select
+              label="App-Profil"
+              value={settings.userExperience.profile}
+              onChange={(value) => updateSetting('userExperience', { ...settings.userExperience, profile: value as Settings['userExperience']['profile'] })}
+              options={[
+                { value: 'personal', label: 'Privat – ohne Freelance-Fokus' },
+                { value: 'freelance', label: 'Freelance – mit Projekt- und Rechnungsfokus' },
+                { value: 'complete', label: 'Komplett – voller Funktionsumfang' },
+              ]}
+            />
+          </div>
+
+          <div className="mt-4 rounded-2xl border border-slate-200 p-4 dark:border-gray-800">
+            <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
+              <div>
+                <p className="text-sm font-semibold text-gray-900 dark:text-white">Geführtes Setup & Hinweise</p>
+                <p className="mt-1 text-sm text-slate-500 dark:text-gray-500">
+                  Status: {settings.userExperience.initialSetupCompleted ? 'Einrichtung abgeschlossen' : 'Einrichtung noch offen'} · Hinweise {settings.userExperience.shortcutsHintSeen ? 'bereits gesehen' : 'noch aktiv'}
+                </p>
+              </div>
+              <div className="flex flex-col gap-2 sm:flex-row">
+                <Button variant="secondary" onClick={() => window.dispatchEvent(new CustomEvent('open-onboarding'))}>
+                  Setup-Assistent öffnen
+                </Button>
+                <Button
+                  variant="ghost"
+                  onClick={() => updateSetting('userExperience', { ...settings.userExperience, shortcutsHintSeen: false })}
+                >
+                  Hinweise erneut zeigen
+                </Button>
+              </div>
+            </div>
           </div>
 
           <div className="mt-4 grid grid-cols-1 gap-3">
@@ -535,6 +669,11 @@ export function SettingsPage() {
         <Card className="p-5">
           <h3 className="mb-4 flex items-center gap-2 text-sm font-bold text-gray-900 dark:text-white">
             <Icon name="BrainCircuit" size={16} className="text-violet-500" /> Analyse-Qualität
+            <HelpTooltip
+              title="Warnungen und Monatslogik"
+              description="Diese Einstellungen bestimmen, wie früh Budgets warnen und wie Monatsvergleiche interpretiert werden."
+              example="Wenn dein Gehalt erst am 3. kommt, kann ein späterer Monatsbeginn realistischer sein."
+            />
           </h3>
           <div className="space-y-4">
             <div className="rounded-2xl bg-slate-50 p-4 dark:bg-gray-800/50">
@@ -559,10 +698,17 @@ export function SettingsPage() {
           </div>
         </Card>
       </div>
+      )}
 
+      {settingsSection === 'basics' && (
       <Card className="p-5">
         <h3 className="mb-4 flex items-center gap-2 text-sm font-bold text-gray-900 dark:text-white">
           <Menu size={16} className="text-indigo-500" /> Menü-Sichtbarkeit
+          <HelpTooltip
+            title="Navigation vereinfachen"
+            description="Blende selten genutzte Bereiche aus. Zusammen mit dem Bedienmodus wird die Sidebar deutlich ruhiger."
+            example="Für reine Privatnutzung kannst du Berichte, Regeln und Aktivitätslog oft ausblenden."
+          />
         </h3>
         <p className="mb-4 text-sm text-slate-500 dark:text-gray-500">
           Blende Menüpunkte aus, die du nicht brauchst, um die Navigation übersichtlicher zu gestalten. Dashboard und Einstellungen bleiben immer sichtbar.
@@ -597,6 +743,7 @@ export function SettingsPage() {
             {
               group: 'Berichte',
               items: [
+                { href: '/monthly-report', label: 'Monatsbericht' },
                 { href: '/annual-report', label: 'Jahresbericht' },
                 { href: '/finance-score', label: 'Finanz-Score' },
                 { href: '/finance-goals', label: 'Finanz-Ziele' },
@@ -669,10 +816,18 @@ export function SettingsPage() {
           </button>
         )}
       </Card>
+      )}
 
+      {settingsSection === 'automation' && (
       <Card className="p-5">
         <h3 className="mb-4 flex items-center gap-2 text-sm font-bold text-gray-900 dark:text-white">
           <Bot size={16} className="text-fuchsia-500" /> AI-Schnittstelle für Belege & Sprache
+          <HelpTooltip
+            title="Optionaler Komfort"
+            description="Die AI-Funktionen sind nicht nötig, machen Belegimport und Spracheingabe aber deutlich schneller. Wenn du alles manuell machen willst, kannst du sie komplett auslassen."
+            example="Workflow: API-Key hinterlegen, Verbindung testen, dann in Ausgaben einen Beleg analysieren lassen."
+            side="left"
+          />
         </h3>
         <div className="grid grid-cols-1 gap-4 xl:grid-cols-[1.1fr_0.9fr]">
           <div className="space-y-4">
@@ -869,7 +1024,9 @@ export function SettingsPage() {
           </div>
         </div>
       </Card>
+      )}
 
+      {settingsSection === 'workspace' && (
       <div className="grid grid-cols-1 gap-4 xl:grid-cols-[1.1fr_0.9fr]">
         <Card className="p-5">
           <h3 className="mb-4 flex items-center gap-2 text-sm font-bold text-gray-900 dark:text-white">
@@ -961,7 +1118,9 @@ export function SettingsPage() {
           </div>
         </Card>
       </div>
+      )}
 
+      {settingsSection === 'automation' && (
       <div className="grid grid-cols-1 gap-4">
         <Card className="p-5">
           <h3 className="mb-4 flex items-center gap-2 text-sm font-bold text-gray-900 dark:text-white">
@@ -971,7 +1130,62 @@ export function SettingsPage() {
             <SettingSwitch title="Budget-Warnungen" description="Meldet frühzeitig, wenn dein Monatsbudget knapp wird." checked={settings.notifications.budgetWarnings} onChange={(value) => updateNotification('budgetWarnings', value)} />
             <SettingSwitch title="Rechnungs-Erinnerungen" description="Praktisch für Fixkosten und Fälligkeitstage." checked={settings.notifications.billReminders} onChange={(value) => updateNotification('billReminders', value)} />
             <SettingSwitch title="Sparziel-Impulse" description="Benachrichtigt bei Meilensteinen und Rückstand." checked={settings.notifications.savingsGoals} onChange={(value) => updateNotification('savingsGoals', value)} />
+            <SettingSwitch title="Monatsbericht bereit" description="Meldet zum Monatswechsel, dass der Bericht des letzten abgeschlossenen Monats fertig ist." checked={settings.notifications.monthlyReport} onChange={(value) => updateNotification('monthlyReport', value)} />
           </div>
+        </Card>
+
+        <Card className="p-5">
+          <div className="flex flex-wrap items-center justify-between gap-3">
+            <div>
+              <h3 className="flex items-center gap-2 text-sm font-bold text-gray-900 dark:text-white">
+                <Icon name="MonitorSmartphone" size={16} className="text-cyan-500" /> System-Benachrichtigungen
+              </h3>
+              <p className="mt-1 text-xs text-slate-500 dark:text-gray-500">
+                Browser- oder System-Popups zusaetzlich zur internen Glocke. Aktuell nutzt die App sie fuer den fertigen Monatsbericht.
+              </p>
+            </div>
+            <Badge
+              color={
+                browserNotificationPermission === 'granted'
+                  ? '#10b981'
+                  : browserNotificationPermission === 'denied'
+                    ? '#ef4444'
+                    : browserNotificationPermission === 'default'
+                      ? '#f59e0b'
+                      : '#64748b'
+              }
+            >
+              {browserNotificationPermission === 'granted'
+                ? 'Aktiv'
+                : browserNotificationPermission === 'denied'
+                  ? 'Blockiert'
+                  : browserNotificationPermission === 'default'
+                    ? 'Nicht freigegeben'
+                    : 'Nicht unterstuetzt'}
+            </Badge>
+          </div>
+
+          <div className="mt-4 flex flex-wrap gap-3">
+            <Button
+              onClick={() => { void requestSystemNotificationPermission(); }}
+              variant={browserNotificationPermission === 'granted' ? 'secondary' : 'primary'}
+              icon="BellRing"
+            >
+              {browserNotificationPermission === 'granted' ? 'Berechtigung aktiv' : 'Berechtigung anfordern'}
+            </Button>
+            <Button
+              onClick={sendSystemNotificationTest}
+              variant="secondary"
+              icon="Send"
+              disabled={browserNotificationPermission !== 'granted'}
+            >
+              Test senden
+            </Button>
+          </div>
+
+          <p className="mt-3 text-xs text-slate-500 dark:text-gray-500">
+            Wenn der Status auf "Blockiert" steht, muss die Freigabe direkt in den Browser- oder macOS-Mitteilungseinstellungen wieder aktiviert werden.
+          </p>
         </Card>
 
         <Card className="p-5">
@@ -996,7 +1210,9 @@ export function SettingsPage() {
           </div>
         </Card>
       </div>
+      )}
 
+      {settingsSection === 'data' && (
       <Card className="p-5">
         <h3 className="mb-4 flex items-center gap-2 text-sm font-bold text-gray-900 dark:text-white">
           <Download size={16} className="text-blue-500" /> Export-Center
@@ -1022,7 +1238,9 @@ export function SettingsPage() {
           </button>
         </div>
       </Card>
+      )}
 
+      {settingsSection === 'data' && (
       <div className="grid grid-cols-1 gap-4 lg:grid-cols-[1fr_0.9fr]">
         <Card className="p-5">
           <h3 className="mb-4 flex items-center gap-2 text-sm font-bold text-gray-900 dark:text-white">
@@ -1059,6 +1277,7 @@ export function SettingsPage() {
           </div>
         </Card>
       </div>
+      )}
     </div>
   );
 }

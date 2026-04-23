@@ -1,6 +1,7 @@
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import jsPDF from 'jspdf';
 import autoTable from 'jspdf-autotable';
+import { useSearchParams } from 'next/navigation';
 import { useFinance } from '@/lib/finance-context';
 import { Button, Card, EmptyState, Input, Modal, ProgressBar, Select, StatCard, Toggle } from '../components/ui';
 import {
@@ -14,6 +15,7 @@ import {
   getMonthDisplayName,
   isSaturday,
 } from '../utils/helpers';
+import { focusElementById, getSearchFocus } from '../utils/searchFocus';
 import type { FreelanceInvoice, FreelanceInvoiceStatus, FreelanceProject, WorkSession } from '../types';
 
 type SessionDraft = {
@@ -73,6 +75,11 @@ const getSessionHourlyDisplayRate = (session: WorkSession, project?: FreelancePr
 export function FreelancePage() {
   const { state, dispatch } = useFinance();
   const { selectedMonth, freelanceProjects, workSessions, freelanceInvoices, invoiceProfile, settings } = state;
+  const lastProjectFocusRef = useRef('');
+  const lastInvoiceFocusRef = useRef('');
+  const searchParams = useSearchParams();
+  const projectFocus = getSearchFocus(searchParams, 'freelance-project');
+  const invoiceFocus = getSearchFocus(searchParams, 'invoice');
   const [projectModalOpen, setProjectModalOpen] = useState(false);
   const [sessionModalOpen, setSessionModalOpen] = useState(false);
   const [bulkModalOpen, setBulkModalOpen] = useState(false);
@@ -99,6 +106,8 @@ export function FreelancePage() {
   const [sessionFilterStatus, setSessionFilterStatus] = useState<'all' | 'open' | 'invoiced'>('all');
   const [sessionFilterMonth, setSessionFilterMonth] = useState<string>('all');
   const [invoiceFilterStatus, setInvoiceFilterStatus] = useState<'all' | 'issued' | 'paid' | 'cancelled'>('all');
+  const [highlightedProjectId, setHighlightedProjectId] = useState<string | null>(null);
+  const [highlightedInvoiceId, setHighlightedInvoiceId] = useState<string | null>(null);
 
   const projectOptions = freelanceProjects.map((project) => ({ value: project.id, label: `${project.name} · ${project.clientName}` }));
 
@@ -262,6 +271,54 @@ export function FreelancePage() {
     const totalAmount = bulkSelectedDates.reduce((sum, date) => sum + calculateSessionNetAmount({ ...templateSession, date }, project), 0);
     return { totalHours, totalAmount };
   }, [bulkDraft, bulkSelectedDates, freelanceProjects]);
+
+  useEffect(() => {
+    if (!projectFocus) return;
+
+    const signature = projectFocus.id;
+    if (lastProjectFocusRef.current === signature) return;
+
+    let clearHighlightTimeout: number | undefined;
+    const cleanupFocus = focusElementById(`freelance-project-${projectFocus.id}`, () => {
+      lastProjectFocusRef.current = signature;
+      setHighlightedProjectId(projectFocus.id);
+      clearHighlightTimeout = window.setTimeout(() => {
+        setHighlightedProjectId((current) => current === projectFocus.id ? null : current);
+      }, 2600);
+    });
+
+    return () => {
+      cleanupFocus();
+      if (clearHighlightTimeout) {
+        window.clearTimeout(clearHighlightTimeout);
+      }
+    };
+  }, [projectFocus?.id]);
+
+  useEffect(() => {
+    if (!invoiceFocus) return;
+
+    const signature = invoiceFocus.id;
+    if (lastInvoiceFocusRef.current === signature) return;
+
+    setInvoiceFilterStatus('all');
+
+    let clearHighlightTimeout: number | undefined;
+    const cleanupFocus = focusElementById(`invoice-${invoiceFocus.id}`, () => {
+      lastInvoiceFocusRef.current = signature;
+      setHighlightedInvoiceId(invoiceFocus.id);
+      clearHighlightTimeout = window.setTimeout(() => {
+        setHighlightedInvoiceId((current) => current === invoiceFocus.id ? null : current);
+      }, 2600);
+    });
+
+    return () => {
+      cleanupFocus();
+      if (clearHighlightTimeout) {
+        window.clearTimeout(clearHighlightTimeout);
+      }
+    };
+  }, [invoiceFocus?.id]);
 
   const saveProject = () => {
     if (!projectDraft.name.trim() || !projectDraft.clientName.trim() || !projectDraft.hourlyRate) return;
@@ -624,7 +681,11 @@ export function FreelancePage() {
         {freelanceProjects.length > 0 ? (
           <div className="space-y-3">
             {freelanceProjects.map((project) => (
-              <div key={project.id} className="flex items-center justify-between gap-3 rounded-2xl border border-slate-200 p-4 dark:border-gray-800">
+              <div
+                key={project.id}
+                id={`freelance-project-${project.id}`}
+                className={`scroll-mt-28 flex items-center justify-between gap-3 rounded-2xl border border-slate-200 p-4 dark:border-gray-800 ${highlightedProjectId === project.id ? 'border-blue-300 bg-blue-50/50 ring-2 ring-blue-500 ring-offset-2 ring-offset-slate-50 dark:border-blue-800 dark:bg-blue-950/20 dark:ring-offset-gray-950' : ''}`}
+              >
                 <div className="min-w-0">
                   <p className="truncate text-sm font-semibold text-gray-900 dark:text-white">{project.name}</p>
                   <p className="text-xs text-slate-500 dark:text-gray-500">
@@ -826,7 +887,11 @@ export function FreelancePage() {
                 const project = freelanceProjects.find((item) => item.id === invoice.projectId);
                 const sessions = workSessions.filter((session) => invoice.sessionIds.includes(session.id));
                 return (
-                  <div key={invoice.id} className="rounded-xl border border-slate-200 p-3 dark:border-gray-800">
+                  <div
+                    key={invoice.id}
+                    id={`invoice-${invoice.id}`}
+                    className={`scroll-mt-28 rounded-xl border border-slate-200 p-3 dark:border-gray-800 ${highlightedInvoiceId === invoice.id ? 'border-blue-300 bg-blue-50/50 ring-2 ring-blue-500 ring-offset-2 ring-offset-slate-50 dark:border-blue-800 dark:bg-blue-950/20 dark:ring-offset-gray-950' : ''}`}
+                  >
                     <div className="flex items-center justify-between gap-3">
                       <div className="min-w-0">
                         <p className="truncate text-sm font-semibold text-gray-900 dark:text-white">{invoice.invoiceNumber}</p>

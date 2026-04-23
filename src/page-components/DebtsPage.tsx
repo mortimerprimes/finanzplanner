@@ -1,10 +1,12 @@
-import { useMemo, useState, type MouseEvent } from 'react';
+import { useEffect, useMemo, useRef, useState, type MouseEvent } from 'react';
+import { useSearchParams } from 'next/navigation';
 import { Area, AreaChart, Bar, BarChart, CartesianGrid, Cell, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts';
 import { Calculator, CircleDollarSign, Pencil, Trash2 } from 'lucide-react';
 import { useFinance } from '@/lib/finance-context';
 import { useTheme } from '../hooks/useTheme';
 import { Card, Button, Input, Select, Modal, EmptyState, Icon, Badge, ProgressBar } from '../components/ui';
 import { formatCurrency, formatDate, generateAmortizationSchedule, compareDebtStrategies } from '../utils/helpers';
+import { focusElementById, getSearchFocus } from '../utils/searchFocus';
 import { DEBT_TYPES } from '../utils/constants';
 import { Debt, DebtType } from '../types';
 import { calculateDebtProjection, calculateRequiredMonthlyPayment } from '../utils/debtCalculations';
@@ -19,6 +21,9 @@ export function DebtsPage() {
   const { state, dispatch } = useFinance();
   const { resolvedTheme } = useTheme();
   const { debts, settings, accounts } = state;
+  const lastSearchFocusRef = useRef('');
+  const searchParams = useSearchParams();
+  const debtFocus = getSearchFocus(searchParams, 'debt');
 
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [editingDebt, setEditingDebt] = useState<Debt | null>(null);
@@ -32,6 +37,7 @@ export function DebtsPage() {
   const [scenarioLumpSum, setScenarioLumpSum] = useState('0');
   const [scenarioInterestRate, setScenarioInterestRate] = useState('');
   const [scenarioTargetMonths, setScenarioTargetMonths] = useState('24');
+  const [highlightedDebtId, setHighlightedDebtId] = useState<string | null>(null);
 
   const [name, setName] = useState('');
   const [totalAmount, setTotalAmount] = useState('');
@@ -310,6 +316,31 @@ export function DebtsPage() {
     event.stopPropagation();
   };
 
+  useEffect(() => {
+    if (!debtFocus) return;
+
+    const signature = debtFocus.id;
+    if (lastSearchFocusRef.current === signature) return;
+
+    setSelectedScenarioDebtId(debtFocus.id);
+
+    let clearHighlightTimeout: number | undefined;
+    const cleanupFocus = focusElementById(`debt-${debtFocus.id}`, () => {
+      lastSearchFocusRef.current = signature;
+      setHighlightedDebtId(debtFocus.id);
+      clearHighlightTimeout = window.setTimeout(() => {
+        setHighlightedDebtId((current) => current === debtFocus.id ? null : current);
+      }, 2600);
+    });
+
+    return () => {
+      cleanupFocus();
+      if (clearHighlightTimeout) {
+        window.clearTimeout(clearHighlightTimeout);
+      }
+    };
+  }, [debtFocus?.id]);
+
   const typeOptions = Object.entries(DEBT_TYPES).map(([value, info]) => ({ value, label: info.labelDe }));
 
   return (
@@ -480,7 +511,8 @@ export function DebtsPage() {
             return (
               <Card
                 key={debt.id}
-                className={`p-5 transition-all ${done ? 'opacity-60' : 'cursor-pointer'} ${isSelected ? 'ring-2 ring-blue-500 ring-offset-2 ring-offset-white dark:ring-offset-gray-950' : ''}`}
+                id={`debt-${debt.id}`}
+                className={`scroll-mt-28 p-5 transition-all ${done ? 'opacity-60' : 'cursor-pointer'} ${isSelected ? 'ring-2 ring-blue-500 ring-offset-2 ring-offset-white dark:ring-offset-gray-950' : ''} ${highlightedDebtId === debt.id ? 'bg-blue-50/40 dark:bg-blue-950/20' : ''}`}
                 onClick={() => {
                   if (!done) openDebtCalculator(debt);
                 }}

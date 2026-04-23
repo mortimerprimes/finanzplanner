@@ -27,14 +27,16 @@ export function Icon({ name, size = 24, className = '', color }: IconProps) {
 
 /* ====== CARD ====== */
 interface CardProps {
+  id?: string;
   children: React.ReactNode;
   className?: string;
   onClick?: () => void;
 }
 
-export function Card({ children, className = '', onClick }: CardProps) {
+export function Card({ id, children, className = '', onClick }: CardProps) {
   return (
     <div
+      id={id}
       onClick={onClick}
       className={`
         bg-white dark:bg-gray-900 rounded-2xl
@@ -437,9 +439,11 @@ interface EmptyStateProps {
   title: string;
   description: string;
   action?: { label: string; onClick: () => void };
+  secondaryAction?: { label: string; onClick: () => void };
+  helpText?: string;
 }
 
-export function EmptyState({ icon, title, description, action }: EmptyStateProps) {
+export function EmptyState({ icon, title, description, action, secondaryAction, helpText }: EmptyStateProps) {
   return (
     <div className="flex flex-col items-center justify-center py-16 text-center px-4">
       <div className="p-4 bg-slate-100 dark:bg-gray-800 rounded-2xl mb-4">
@@ -447,8 +451,16 @@ export function EmptyState({ icon, title, description, action }: EmptyStateProps
       </div>
       <h3 className="text-base font-semibold text-gray-900 dark:text-white mb-1">{title}</h3>
       <p className="text-sm text-slate-500 dark:text-gray-500 max-w-xs mb-5">{description}</p>
-      {action && (
-        <Button onClick={action.onClick} icon="Plus">{action.label}</Button>
+      {helpText && <p className="mb-5 max-w-sm text-xs leading-6 text-slate-500 dark:text-gray-400">{helpText}</p>}
+      {(action || secondaryAction) && (
+        <div className="flex flex-col gap-2 sm:flex-row">
+          {action && (
+            <Button onClick={action.onClick} icon="Plus">{action.label}</Button>
+          )}
+          {secondaryAction && (
+            <Button variant="secondary" onClick={secondaryAction.onClick}>{secondaryAction.label}</Button>
+          )}
+        </div>
       )}
     </div>
   );

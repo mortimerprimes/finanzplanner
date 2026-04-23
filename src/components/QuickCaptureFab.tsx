@@ -1,6 +1,6 @@
 'use client';
 
-import { ChangeEvent, useState } from 'react';
+import { ChangeEvent, useEffect, useState } from 'react';
 import { Camera, Mic, Plus, Receipt, TrendingUp, Wallet } from 'lucide-react';
 import { useFinance } from '@/lib/finance-context';
 import { Button, Input, Modal, Select } from './ui';
@@ -47,6 +47,19 @@ export function QuickCaptureFab() {
   const [aiError, setAIError] = useState('');
   const [aiLoading, setAILoading] = useState(false);
   const [voiceTranscript, setVoiceTranscript] = useState('');
+
+  useEffect(() => {
+    if (!settings.quickEntry) return;
+
+    const handleOpen = (event: Event) => {
+      const detail = (event as CustomEvent<{ type?: CaptureType }>).detail;
+      setCaptureType(detail?.type || 'expense');
+      setIsOpen(true);
+    };
+
+    window.addEventListener('open-quick-capture', handleOpen as EventListener);
+    return () => window.removeEventListener('open-quick-capture', handleOpen as EventListener);
+  }, [settings.quickEntry]);
 
   if (!settings.quickEntry) {
     return null;

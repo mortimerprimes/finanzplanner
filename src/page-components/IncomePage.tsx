@@ -1,7 +1,9 @@
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
+import { useSearchParams } from 'next/navigation';
 import { useFinance } from '@/lib/finance-context';
 import { Card, Button, Input, Select, Modal, EmptyState, Icon, Badge, MonthPicker } from '../components/ui';
 import { formatCurrency, reconcileIncomesForMonth, getMonthDisplayName } from '../utils/helpers';
+import { focusElementById, getSearchFocus } from '../utils/searchFocus';
 import { INCOME_TYPES } from '../utils/constants';
 import { Income, IncomeType, PlannedIncome } from '../types';
 import { Pencil, Trash2, CalendarClock, TrendingUp, Plus } from 'lucide-react';
@@ -9,11 +11,15 @@ import { Pencil, Trash2, CalendarClock, TrendingUp, Plus } from 'lucide-react';
 export function IncomePage() {
   const { state, dispatch } = useFinance();
   const { incomes, settings, selectedMonth, plannedIncomes, accounts } = state;
+  const lastSearchFocusRef = useRef('');
+  const searchParams = useSearchParams();
+  const incomeFocus = getSearchFocus(searchParams, 'income');
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [editingIncome, setEditingIncome] = useState<Income | null>(null);
   const [plannedModalOpen, setPlannedModalOpen] = useState(false);
   const [editingPlanned, setEditingPlanned] = useState<PlannedIncome | null>(null);
   const [showForecast, setShowForecast] = useState(false);
+  const [highlightedIncomeId, setHighlightedIncomeId] = useState<string | null>(null);
 
   const [name, setName] = useState('');
   const [amount, setAmount] = useState('');
@@ -72,6 +78,33 @@ export function IncomePage() {
     }
     return months;
   }, [incomes, plannedIncomes, selectedMonth]);
+
+  useEffect(() => {
+    if (!incomeFocus) return;
+
+    const signature = `${incomeFocus.id}:${incomeFocus.month || ''}`;
+    if (lastSearchFocusRef.current === signature) return;
+
+    if (incomeFocus.month && selectedMonth !== incomeFocus.month) {
+      dispatch({ type: 'SET_SELECTED_MONTH', payload: incomeFocus.month });
+    }
+
+    let clearHighlightTimeout: number | undefined;
+    const cleanupFocus = focusElementById(`income-${incomeFocus.id}`, () => {
+      lastSearchFocusRef.current = signature;
+      setHighlightedIncomeId(incomeFocus.id);
+      clearHighlightTimeout = window.setTimeout(() => {
+        setHighlightedIncomeId((current) => current === incomeFocus.id ? null : current);
+      }, 2600);
+    });
+
+    return () => {
+      cleanupFocus();
+      if (clearHighlightTimeout) {
+        window.clearTimeout(clearHighlightTimeout);
+      }
+    };
+  }, [dispatch, incomeFocus?.id, incomeFocus?.month, selectedMonth]);
 
   const openModal = (income?: Income) => {
     if (income) {
@@ -303,7 +336,11 @@ export function IncomePage() {
           {monthIncomes.map((income) => {
             const info = INCOME_TYPES[income.type];
             return (
-              <Card key={income.id} className="p-4">
+              <Card
+                key={income.id}
+                id={`income-${income.id}`}
+                className={`scroll-mt-28 p-4 ${highlightedIncomeId === income.id ? 'ring-2 ring-blue-500 ring-offset-2 ring-offset-slate-50 bg-blue-50/40 dark:bg-blue-950/20 dark:ring-offset-gray-950' : ''}`}
+              >
                 <div className="flex items-center justify-between gap-3">
                   <div className="flex items-center gap-3 min-w-0">
                     <div className="p-2.5 rounded-xl flex-shrink-0" style={{ backgroundColor: `${info.color}15` }}>

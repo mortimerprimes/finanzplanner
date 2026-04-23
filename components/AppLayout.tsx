@@ -13,13 +13,14 @@ import {
 import { useTheme } from '@/src/hooks/useTheme';
 import { useFinance } from '@/lib/finance-context';
 import { getMonthDisplayName, getMonthPickerRange, shiftMonth } from '@/src/utils/helpers';
-import { Modal } from '@/src/components/ui';
+import { Button, Modal } from '@/src/components/ui';
 import { QuickCaptureFab } from '@/src/components/QuickCaptureFab';
 import { NotificationBell } from '@/components/NotificationBell';
 import { useNotificationEngine } from '@/src/hooks/useNotifications';
 import { GlobalSearch } from '@/src/components/GlobalSearch';
 import { useKeyboardShortcuts, KeyboardShortcutsHelp } from '@/src/hooks/useKeyboardShortcuts';
 import { useSession } from 'next-auth/react';
+import { OnboardingWizard } from '@/src/components/OnboardingWizard';
 
 interface NavItem {
   href: string;
@@ -63,6 +64,7 @@ const navGroups: NavGroup[] = [
   {
     label: 'Berichte',
     items: [
+      { href: '/monthly-report', label: 'Monatsbericht', icon: FileBarChart },
       { href: '/annual-report', label: 'Jahresbericht', icon: FileBarChart },
       { href: '/finance-score', label: 'Finanz-Score', icon: Shield },
       { href: '/finance-goals', label: 'Finanz-Ziele', icon: Flag },
@@ -97,17 +99,49 @@ const mobileTabItems: NavItem[] = [
   { href: '/accounts', label: 'Konten', icon: Landmark },
 ];
 
+const GUIDED_MODE_HIDDEN_ITEMS = [
+  '/annual-report',
+  '/finance-score',
+  '/finance-goals',
+  '/category-rules',
+  '/activity-log',
+];
+
 export function AppLayout({ children }: { children: React.ReactNode }) {
   const [sidebarOpen, setSidebarOpen] = useState(true);
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
   const [monthPickerOpen, setMonthPickerOpen] = useState(false);
+  const [onboardingOpen, setOnboardingOpen] = useState(false);
   const [collapsedGroups, setCollapsedGroups] = useState<Set<string>>(new Set());
   const { theme, setTheme, resolvedTheme } = useTheme();
-  const { state, dispatch } = useFinance();
+  const { state, dispatch, isLoading } = useFinance();
   const pathname = usePathname();
   const { data: session } = useSession();
   const isAdmin = (session?.user as { role?: string } | undefined)?.role === 'admin';
   const hiddenMenuItems = state.settings.hiddenMenuItems || [];
+  const experienceMode = state.settings.userExperience.mode;
+  const experienceProfile = state.settings.userExperience.profile;
+  const [shortcutsOpen, setShortcutsOpen] = useState(false);
+  const [shortcutsHintOpen, setShortcutsHintOpen] = useState(false);
+
+  const effectiveHiddenMenuItems = (() => {
+    const items = new Set(hiddenMenuItems);
+    if (experienceMode === 'guided') {
+      GUIDED_MODE_HIDDEN_ITEMS.forEach((item) => items.add(item));
+    }
+    if (experienceProfile === 'personal') {
+      items.add('/freelance');
+    }
+    return items;
+  })();
+
+  const setupChecklist = [
+    { label: 'Konto', done: state.accounts.length > 0 },
+    { label: 'Einnahme', done: state.incomes.length > 0 },
+    { label: 'Planung', done: state.fixedExpenses.length > 0 || state.expenses.length > 0 },
+  ];
+  const hasSetupData = setupChecklist.every((item) => item.done);
+  const needsSetupBanner = !state.settings.userExperience.initialSetupCompleted && !isLoading;
 
   // Filter nav groups based on admin role and hidden items
   const visibleGroups = navGroups
@@ -115,7 +149,7 @@ export function AppLayout({ children }: { children: React.ReactNode }) {
       ...group,
       items: group.items.filter(item => {
         if (item.adminOnly && !isAdmin) return false;
-        if (hiddenMenuItems.includes(item.href)) return false;
+        if (effectiveHiddenMenuItems.has(item.href)) return false;
         return true;
       }),
     }))
@@ -137,13 +171,83 @@ export function AppLayout({ children }: { children: React.ReactNode }) {
   useNotificationEngine();
   // Keyboard shortcuts
   useKeyboardShortcuts();
-  const [shortcutsOpen, setShortcutsOpen] = useState(false);
 
   useEffect(() => {
     const handler = () => setShortcutsOpen(true);
     window.addEventListener('show-shortcuts', handler);
     return () => window.removeEventListener('show-shortcuts', handler);
   }, []);
+
+  useEffect(() => {
+    const handler = () => setOnboardingOpen(true);
+    window.addEventListener('open-onboarding', handler);
+    return () => window.removeEventListener('open-onboarding', handler);
+  }, []);
+
+  useEffect(() => {
+    if (!isLoading && hasSetupData && !state.settings.userExperience.initialSetupCompleted) {
+      dispatch({
+        type: 'UPDATE_SETTINGS',
+        payload: {
+          userExperience: {
+            ...state.settings.userExperience,
+            initialSetupCompleted: true,
+          },
+        },
+      });
+    }
+  }, [dispatch, hasSetupData, isLoading, state.settings.userExperience]);
+
+  useEffect(() => {
+    if (
+      !isLoading
+      && !state.settings.userExperience.onboardingCompleted
+      && state.accounts.length === 0
+      && state.incomes.length === 0
+      && state.fixedExpenses.length === 0
+      && state.expenses.length === 0
+    ) {
+      setOnboardingOpen(true);
+    }
+  }, [
+    isLoading,
+    state.accounts.length,
+    state.expenses.length,
+    state.fixedExpenses.length,
+    state.incomes.length,
+    state.settings.userExperience.onboardingCompleted,
+  ]);
+
+  useEffect(() => {
+    if (
+      !isLoading
+      && state.settings.userExperience.onboardingCompleted
+      && !state.settings.userExperience.shortcutsHintSeen
+      && !onboardingOpen
+    ) {
+      setShortcutsHintOpen(true);
+    }
+  }, [
+    isLoading,
+    onboardingOpen,
+    state.settings.userExperience.onboardingCompleted,
+    state.settings.userExperience.shortcutsHintSeen,
+  ]);
+
+  useEffect(() => {
+    if (!shortcutsOpen || state.settings.userExperience.shortcutsHintSeen) return;
+
+    dispatch({
+      type: 'UPDATE_SETTINGS',
+      payload: {
+        userExperience: {
+          ...state.settings.userExperience,
+          shortcutsHintSeen: true,
+        },
+      },
+    });
+    setShortcutsHintOpen(false);
+  }, [dispatch, shortcutsOpen, state.settings.userExperience]);
 
   useEffect(() => {
     setMobileMenuOpen(false);
@@ -191,6 +295,19 @@ export function AppLayout({ children }: { children: React.ReactNode }) {
   const sidebarW = sidebarOpen ? 260 : 72;
   const monthOptions = getMonthPickerRange(state.selectedMonth, 8, 7);
   const isSettingsPage = pathname === '/settings';
+
+  const dismissShortcutsHint = () => {
+    dispatch({
+      type: 'UPDATE_SETTINGS',
+      payload: {
+        userExperience: {
+          ...state.settings.userExperience,
+          shortcutsHintSeen: true,
+        },
+      },
+    });
+    setShortcutsHintOpen(false);
+  };
 
   const handleSelectMonth = (month: string) => {
     dispatch({ type: 'SET_SELECTED_MONTH', payload: month });
@@ -392,6 +509,49 @@ export function AppLayout({ children }: { children: React.ReactNode }) {
 
         <main className="flex-1 overflow-y-auto overflow-x-hidden p-3 pb-[calc(5.5rem+var(--safe-area-bottom))] md:p-5 lg:p-6 lg:pb-6">
           <div className="mx-auto w-full max-w-6xl 2xl:max-w-[1320px]">
+            {needsSetupBanner && !isSettingsPage && (
+              <div className="mb-4 overflow-hidden rounded-2xl border border-blue-200 bg-gradient-to-r from-blue-50 via-white to-cyan-50 p-4 shadow-sm dark:border-blue-900/40 dark:from-blue-950/30 dark:via-gray-900 dark:to-cyan-950/20 sm:rounded-3xl">
+                <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
+                  <div>
+                    <div className="flex flex-wrap items-center gap-2">
+                      <span className="rounded-full bg-blue-600 px-2.5 py-1 text-[11px] font-bold uppercase tracking-[0.16em] text-white">Einfacher Start</span>
+                      <span className="text-xs font-medium text-slate-500 dark:text-gray-400">Modus: {experienceMode === 'guided' ? 'Gefuehrt' : experienceMode === 'standard' ? 'Standard' : 'Power'}</span>
+                    </div>
+                    <h3 className="mt-3 text-lg font-bold text-gray-900 dark:text-white">Dein Setup ist noch nicht komplett.</h3>
+                    <p className="mt-1 text-sm text-slate-600 dark:text-gray-400">
+                      Richte Konto, Einnahme und eine erste Planung ein. Danach werden Dashboard, Suche und Forecasts deutlich hilfreicher.
+                    </p>
+                    <div className="mt-3 flex flex-wrap gap-2">
+                      {setupChecklist.map((item) => (
+                        <span
+                          key={item.label}
+                          className={`rounded-full px-3 py-1.5 text-xs font-semibold ${
+                            item.done
+                              ? 'bg-emerald-100 text-emerald-700 dark:bg-emerald-950/30 dark:text-emerald-300'
+                              : 'bg-slate-100 text-slate-600 dark:bg-gray-800 dark:text-gray-300'
+                          }`}
+                        >
+                          {item.done ? '✓ ' : ''}{item.label}
+                        </span>
+                      ))}
+                    </div>
+                  </div>
+                  <div className="flex flex-col gap-2 sm:flex-row lg:items-center">
+                    <Button onClick={() => setOnboardingOpen(true)} className="w-full sm:w-auto">Setup oeffnen</Button>
+                    <Button
+                      variant="secondary"
+                      onClick={() => {
+                        setShortcutsOpen(true);
+                        dismissShortcutsHint();
+                      }}
+                      className="w-full sm:w-auto"
+                    >
+                      Kurzbefehle ansehen
+                    </Button>
+                  </div>
+                </div>
+              </div>
+            )}
             {children}
           </div>
         </main>
@@ -487,6 +647,47 @@ export function AppLayout({ children }: { children: React.ReactNode }) {
       </Modal>
 
       {!isSettingsPage && <QuickCaptureFab />}
+      {shortcutsHintOpen && (
+        <div className="fixed inset-x-4 bottom-[calc(6.75rem+var(--safe-area-bottom))] z-[90] mx-auto max-w-md rounded-3xl border border-slate-200 bg-white p-4 shadow-2xl dark:border-gray-800 dark:bg-gray-900 sm:left-auto sm:right-6 sm:mx-0 sm:w-[360px] sm:bottom-6">
+          <div className="flex items-start justify-between gap-4">
+            <div>
+              <p className="text-sm font-semibold text-gray-900 dark:text-white">Schneller arbeiten</p>
+              <p className="mt-1 text-sm leading-6 text-slate-600 dark:text-gray-400">
+                Nutze <span className="font-semibold text-gray-900 dark:text-white">Cmd/Ctrl+K</span> fuer die Befehls-Palette und <span className="font-semibold text-gray-900 dark:text-white">?</span> fuer alle Kurzbefehle.
+              </p>
+            </div>
+            <button
+              onClick={dismissShortcutsHint}
+              className="rounded-lg p-1.5 text-slate-400 transition-colors hover:bg-slate-100 dark:text-gray-500 dark:hover:bg-gray-800"
+              aria-label="Hinweis schliessen"
+            >
+              <X size={16} />
+            </button>
+          </div>
+          <div className="mt-4 flex flex-col gap-2 sm:flex-row">
+            <Button
+              onClick={() => {
+                window.dispatchEvent(new CustomEvent('open-command-palette'));
+                dismissShortcutsHint();
+              }}
+              className="w-full sm:flex-1"
+            >
+              Palette oeffnen
+            </Button>
+            <Button
+              variant="secondary"
+              onClick={() => {
+                setShortcutsOpen(true);
+                dismissShortcutsHint();
+              }}
+              className="w-full sm:flex-1"
+            >
+              Alle Kurzbefehle
+            </Button>
+          </div>
+        </div>
+      )}
+      <OnboardingWizard isOpen={onboardingOpen} onClose={() => setOnboardingOpen(false)} />
       <KeyboardShortcutsHelp isOpen={shortcutsOpen} onClose={() => setShortcutsOpen(false)} />
     </div>
   );

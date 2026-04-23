@@ -18,6 +18,12 @@ export function useKeyboardShortcuts() {
       const tag = (e.target as HTMLElement)?.tagName;
       if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT') return;
 
+      if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'k') {
+        e.preventDefault();
+        window.dispatchEvent(new CustomEvent('open-command-palette'));
+        return;
+      }
+
       // Ctrl/Cmd+Z = Undo
       if ((e.ctrlKey || e.metaKey) && e.key === 'z') {
         e.preventDefault();

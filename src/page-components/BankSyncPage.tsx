@@ -2,6 +2,7 @@ import { ChangeEvent, useMemo, useState } from 'react';
 import { BrainCircuit, FileSpreadsheet, RefreshCw, Trash2, Upload } from 'lucide-react';
 import { useFinance } from '@/lib/finance-context';
 import { Card, Button, Select, Input, Badge, EmptyState } from '../components/ui';
+import { HelpTooltip } from '../components/HelpTooltip';
 import { INCOME_TYPES } from '../utils/constants';
 import { formatCurrency, generateId, getExpenseCategoryMap } from '../utils/helpers';
 import { categorizeBankTransactionsWithAI } from '../services/ai';
@@ -88,6 +89,13 @@ export function BankSyncPage() {
     accountAssigned: drafts.filter((item) => Boolean(item.accountId)).length,
     rulesApplied: drafts.filter((item) => item.accountSource === 'account-rule' || item.categorySource !== 'local').length,
   }), [drafts]);
+
+  const guideSteps = [
+    { label: 'Verbindung', done: bankConnections.length > 0, optional: false },
+    { label: 'Regeln', done: accountRules.length > 0 || categoryRules.length > 0, optional: true },
+    { label: 'Datei laden', done: Boolean(syncInfo), optional: false },
+    { label: 'Import', done: drafts.length > 0, optional: false },
+  ];
 
   const mapTransactionsToDrafts = (transactions: SyncTransaction[], defaultAccountId: string) => {
     return transactions.map((transaction) => mapSyncTransactionToDraft(transaction, {
@@ -343,8 +351,47 @@ export function BankSyncPage() {
         </div>
       </div>
 
+      <Card className="border-blue-200 bg-blue-50/70 p-5 dark:border-blue-900/50 dark:bg-blue-950/20">
+        <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
+          <div>
+            <div className="flex items-center gap-2">
+              <p className="text-sm font-semibold text-gray-900 dark:text-white">Schnellmodus für Einsteiger</p>
+              <HelpTooltip
+                title="Was ist wirklich nötig?"
+                description="Für den ersten Import reichen Verbindung und Datei. Regeln sind optional und helfen erst bei wiederkehrenden Buchungstexten."
+                example="Minimaler Ablauf: Verbindung anlegen -> Datei hochladen -> Vorschau prüfen -> importieren."
+              />
+            </div>
+            <p className="mt-1 text-sm text-slate-600 dark:text-gray-400">
+              Wenn du schnell starten willst, überspringe Schritt 2 zuerst. Die Regeln kannst du danach immer noch ergänzen.
+            </p>
+          </div>
+          <div className="flex flex-wrap gap-2">
+            {guideSteps.map((step) => (
+              <span
+                key={step.label}
+                className={`rounded-full px-3 py-1.5 text-xs font-semibold ${
+                  step.done
+                    ? 'bg-emerald-100 text-emerald-700 dark:bg-emerald-950/30 dark:text-emerald-300'
+                    : 'bg-white text-slate-600 dark:bg-gray-900 dark:text-gray-300'
+                }`}
+              >
+                {step.done ? '✓ ' : ''}{step.label}{step.optional ? ' optional' : ''}
+              </span>
+            ))}
+          </div>
+        </div>
+      </Card>
+
       <Card className="p-5">
-        <h3 className="text-base font-semibold text-gray-900 dark:text-white">1. Verbindung anlegen</h3>
+        <h3 className="flex items-center gap-2 text-base font-semibold text-gray-900 dark:text-white">
+          1. Verbindung anlegen
+          <HelpTooltip
+            title="Verbindung speichern"
+            description="Die Verbindung merkt sich Name und Standardkonto, damit du spätere Importe schneller starten kannst."
+            example="Beispiel: ELBA Giro Privat -> Standardkonto Girokonto DKB."
+          />
+        </h3>
         <p className="mb-4 mt-1 text-sm text-slate-500 dark:text-gray-500">Einmalige Einrichtung wie in Finanz-Apps: Verbindung speichern und beim nächsten Sync wiederverwenden.</p>
         <div className="grid grid-cols-1 gap-3 md:grid-cols-3">
           <Input value={newConnectionName} onChange={setNewConnectionName} label="Verbindungsname" placeholder="z.B. ELBA Girokonto Privat" />
@@ -358,7 +405,15 @@ export function BankSyncPage() {
       <Card className="p-5">
         <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
           <div>
-            <h3 className="text-base font-semibold text-gray-900 dark:text-white">2. Automatische Zuweisung</h3>
+            <h3 className="flex items-center gap-2 text-base font-semibold text-gray-900 dark:text-white">
+              2. Automatische Zuweisung
+              <Badge color="#64748b">Optional</Badge>
+              <HelpTooltip
+                title="Regeln helfen bei Wiederholungen"
+                description="Kontoregeln und Kategorie-Regeln sparen Zeit, wenn dieselben Gegenparteien immer wieder auftauchen. Für den ersten Import brauchst du sie nicht zwingend."
+                example="Beispiel: Alle Buchungen mit REWE automatisch als Lebensmittel markieren."
+              />
+            </h3>
             <p className="mt-1 text-sm text-slate-500 dark:text-gray-500">Kategorie-Regeln und Kontoregeln greifen beim Bank Sync und beim direkten Kontoauszug-Import in Konten.</p>
           </div>
           <div className="flex flex-wrap gap-2">
@@ -409,7 +464,15 @@ export function BankSyncPage() {
       </Card>
 
       <Card className="p-5">
-        <h3 className="text-base font-semibold text-gray-900 dark:text-white">3. Sync starten</h3>
+        <h3 className="flex items-center gap-2 text-base font-semibold text-gray-900 dark:text-white">
+          3. Sync starten
+          <HelpTooltip
+            title="Import mit Vorschau"
+            description="Nach dem Upload siehst du jede Buchung in einer Vorschau. Dort kannst du Typ, Kategorie, Konto und Abgleich vor dem echten Import anpassen."
+            example="Wenn eine Gehaltsbuchung falsch als Ausgabe erkannt wird, kannst du sie hier direkt umstellen."
+            side="left"
+          />
+        </h3>
         <div className="mt-4 grid grid-cols-1 gap-3 md:grid-cols-3">
           <Select
             value={connectionId}
@@ -458,6 +521,7 @@ export function BankSyncPage() {
             icon="FileSpreadsheet"
             title="Noch keine Sync-Daten"
             description="Wähle eine Verbindung und lade einen ELBA-Export hoch."
+            helpText="Für den ersten Durchlauf reichen Verbindung und Datei. Regeln und AI-Verfeinerung kannst du später ergänzen."
           />
         </Card>
       ) : (

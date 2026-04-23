@@ -1,7 +1,9 @@
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
+import { useSearchParams } from 'next/navigation';
 import { useFinance } from '@/lib/finance-context';
 import { Card, Button, Input, Select, Modal, EmptyState, Icon, Badge } from '../components/ui';
 import { formatCurrency, reconcileFixedExpensesForMonth, getMonthDisplayName } from '../utils/helpers';
+import { focusElementById, getSearchFocus } from '../utils/searchFocus';
 import { FIXED_EXPENSE_CATEGORIES } from '../utils/constants';
 import { FixedExpense, FixedExpenseCategory } from '../types';
 import { Pencil, Trash2, ToggleLeft, ToggleRight, Link2, CheckCircle2, Play, Undo2 } from 'lucide-react';
@@ -13,8 +15,12 @@ function isAutoBookEnabled(expense: Pick<FixedExpense, 'autoBookEnabled'>): bool
 export function FixedExpensesPage() {
   const { state, dispatch } = useFinance();
   const { fixedExpenses, debts, settings, expenses, selectedMonth, autoBookings, accounts } = state;
+  const lastSearchFocusRef = useRef('');
+  const searchParams = useSearchParams();
+  const fixedExpenseFocus = getSearchFocus(searchParams, 'fixed-expense');
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [editingExpense, setEditingExpense] = useState<FixedExpense | null>(null);
+  const [highlightedExpenseId, setHighlightedExpenseId] = useState<string | null>(null);
 
   const [name, setName] = useState('');
   const [amount, setAmount] = useState('');
@@ -118,6 +124,29 @@ export function FixedExpensesPage() {
     return g;
   }, {} as Record<string, FixedExpense[]>);
 
+  useEffect(() => {
+    if (!fixedExpenseFocus) return;
+
+    const signature = fixedExpenseFocus.id;
+    if (lastSearchFocusRef.current === signature) return;
+
+    let clearHighlightTimeout: number | undefined;
+    const cleanupFocus = focusElementById(`fixed-expense-${fixedExpenseFocus.id}`, () => {
+      lastSearchFocusRef.current = signature;
+      setHighlightedExpenseId(fixedExpenseFocus.id);
+      clearHighlightTimeout = window.setTimeout(() => {
+        setHighlightedExpenseId((current) => current === fixedExpenseFocus.id ? null : current);
+      }, 2600);
+    });
+
+    return () => {
+      cleanupFocus();
+      if (clearHighlightTimeout) {
+        window.clearTimeout(clearHighlightTimeout);
+      }
+    };
+  }, [fixedExpenseFocus?.id]);
+
   return (
     <div className="space-y-6 animate-fade-in">
       <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
@@ -194,7 +223,11 @@ export function FixedExpensesPage() {
                     const isBooked = monthBookings.some(ab => ab.sourceId === expense.id);
                     const linkedDebt = expense.linkedDebtId ? debts.find(d => d.id === expense.linkedDebtId) : null;
                     return (
-                      <Card key={expense.id} className={`p-4 ${!expense.isActive ? 'opacity-50' : ''}`}>
+                      <Card
+                        key={expense.id}
+                        id={`fixed-expense-${expense.id}`}
+                        className={`scroll-mt-28 p-4 ${!expense.isActive ? 'opacity-50' : ''} ${highlightedExpenseId === expense.id ? 'ring-2 ring-blue-500 ring-offset-2 ring-offset-slate-50 bg-blue-50/40 dark:bg-blue-950/20 dark:ring-offset-gray-950' : ''}`}
+                      >
                         <div className="flex items-center justify-between gap-3">
                           <div className="flex items-center gap-3 min-w-0">
                             <button onClick={() => toggleActive(expense)} className="flex-shrink-0">

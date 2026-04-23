@@ -1,7 +1,9 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
+import { useSearchParams } from 'next/navigation';
 import { useFinance } from '@/lib/finance-context';
 import { Card, Button, Input, Select, Modal, EmptyState, Icon, Badge, ProgressBar } from '../components/ui';
 import { formatCurrency, calculateSavingsStreak } from '../utils/helpers';
+import { focusElementById, getSearchFocus } from '../utils/searchFocus';
 import { SavingsGoal } from '../types';
 import { Pencil, Trash2, PiggyBank, Plus, Minus, Flame, Star } from 'lucide-react';
 
@@ -18,11 +20,15 @@ const GOAL_ICONS: Record<string, { icon: string; color: string; label: string }>
 export function SavingsPage() {
   const { state, dispatch } = useFinance();
   const { savingsGoals, settings } = state;
+  const lastSearchFocusRef = useRef('');
+  const searchParams = useSearchParams();
+  const savingsFocus = getSearchFocus(searchParams, 'savings');
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [editingGoal, setEditingGoal] = useState<SavingsGoal | null>(null);
   const [depositGoal, setDepositGoal] = useState<SavingsGoal | null>(null);
   const [depositAmount, setDepositAmount] = useState('');
   const [isWithdraw, setIsWithdraw] = useState(false);
+  const [highlightedGoalId, setHighlightedGoalId] = useState<string | null>(null);
 
   const [name, setName] = useState('');
   const [targetAmount, setTargetAmount] = useState('');
@@ -92,6 +98,29 @@ export function SavingsPage() {
 
   const goalOptions = Object.entries(GOAL_ICONS).map(([v, info]) => ({ value: v, label: info.label }));
 
+  useEffect(() => {
+    if (!savingsFocus) return;
+
+    const signature = savingsFocus.id;
+    if (lastSearchFocusRef.current === signature) return;
+
+    let clearHighlightTimeout: number | undefined;
+    const cleanupFocus = focusElementById(`savings-${savingsFocus.id}`, () => {
+      lastSearchFocusRef.current = signature;
+      setHighlightedGoalId(savingsFocus.id);
+      clearHighlightTimeout = window.setTimeout(() => {
+        setHighlightedGoalId((current) => current === savingsFocus.id ? null : current);
+      }, 2600);
+    });
+
+    return () => {
+      cleanupFocus();
+      if (clearHighlightTimeout) {
+        window.clearTimeout(clearHighlightTimeout);
+      }
+    };
+  }, [savingsFocus?.id]);
+
   return (
     <div className="space-y-6 animate-fade-in">
       <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
@@ -149,7 +178,11 @@ export function SavingsPage() {
             const monthsLeft = goal.monthlyContribution > 0 ? Math.ceil(remaining / goal.monthlyContribution) : Infinity;
             const streak = calculateSavingsStreak(goal.depositHistory || []);
             return (
-              <Card key={goal.id} className={`p-5 ${done ? 'ring-2 ring-emerald-400 dark:ring-emerald-600' : ''}`}>
+              <Card
+                key={goal.id}
+                id={`savings-${goal.id}`}
+                className={`scroll-mt-28 p-5 ${done ? 'ring-2 ring-emerald-400 dark:ring-emerald-600' : ''} ${highlightedGoalId === goal.id ? 'ring-2 ring-blue-500 ring-offset-2 ring-offset-slate-50 bg-blue-50/40 dark:bg-blue-950/20 dark:ring-offset-gray-950' : ''}`}
+              >
                 <div className="flex flex-col gap-4">
                   <div className="flex items-start justify-between gap-3">
                     <div className="flex items-center gap-3 min-w-0">

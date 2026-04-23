@@ -115,8 +115,16 @@ export const DEFAULT_SETTINGS = {
     budgetWarnings: true,
     billReminders: true,
     savingsGoals: true,
+    monthlyReport: true,
   },
   hiddenMenuItems: [],
+  userExperience: {
+    onboardingCompleted: false,
+    initialSetupCompleted: false,
+    shortcutsHintSeen: false,
+    mode: 'guided' as const,
+    profile: 'personal' as const,
+  },
 };
 
 // Available Currencies

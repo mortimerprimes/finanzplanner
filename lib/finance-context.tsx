@@ -651,6 +651,7 @@ function financeReducer(state: FinanceState, action: Action): FinanceState {
           googleDrive: { ...DEFAULT_SETTINGS.googleDrive, ...action.payload.settings?.googleDrive },
           localFolder: { ...DEFAULT_SETTINGS.localFolder, ...action.payload.settings?.localFolder },
           notifications: { ...DEFAULT_SETTINGS.notifications, ...action.payload.settings?.notifications },
+          userExperience: { ...DEFAULT_SETTINGS.userExperience, ...action.payload.settings?.userExperience },
         },
       };
       const syncedCurrentMonth = syncCurrentMonthRecurringIncomeAutoBookings(nextState, now);
@@ -673,6 +674,7 @@ function financeReducer(state: FinanceState, action: Action): FinanceState {
           googleDrive: action.payload.googleDrive ? { ...state.settings.googleDrive, ...action.payload.googleDrive } : state.settings.googleDrive,
           localFolder: action.payload.localFolder ? { ...state.settings.localFolder, ...action.payload.localFolder } : state.settings.localFolder,
           notifications: action.payload.notifications ? { ...state.settings.notifications, ...action.payload.notifications } : state.settings.notifications,
+          userExperience: action.payload.userExperience ? { ...state.settings.userExperience, ...action.payload.userExperience } : state.settings.userExperience,
         },
       };
 
@@ -1427,6 +1429,7 @@ function financeReducer(state: FinanceState, action: Action): FinanceState {
           googleDrive: { ...DEFAULT_SETTINGS.googleDrive, ...action.payload.settings?.googleDrive },
           localFolder: { ...DEFAULT_SETTINGS.localFolder, ...action.payload.settings?.localFolder },
           notifications: { ...DEFAULT_SETTINGS.notifications, ...action.payload.settings?.notifications },
+          userExperience: { ...DEFAULT_SETTINGS.userExperience, ...action.payload.settings?.userExperience },
         },
         currentMonth: action.payload.currentMonth || action.payload.selectedMonth || state.currentMonth,
       };

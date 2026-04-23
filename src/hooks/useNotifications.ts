@@ -7,9 +7,13 @@ import {
   formatCurrency,
   getActiveBudgetLimits,
   getBudgetLimitValue,
+  getMonthDisplayName,
   getExpenseCategoryInfo,
   getCurrentMonth,
+  shiftMonth,
 } from '../utils/helpers';
+
+const MONTHLY_REPORT_NOTIFICATION_KEY = 'finanzplanner_monthly_report_ready';
 
 /**
  * Generates in-app notifications based on budget warnings, bill reminders,
@@ -21,7 +25,7 @@ export function useNotificationEngine() {
   const lastRunRef = useRef<string>('');
 
   useEffect(() => {
-    const { settings, incomes, fixedExpenses, debts, expenses, savingsGoals, budgetLimits, accounts, notifications } = state;
+    const { settings, incomes, fixedExpenses, debts, expenses, savingsGoals, budgetLimits, accounts, notifications, workSessions } = state;
     const month = getCurrentMonth();
 
     // Deduplicate: only run once per data snapshot (simple fingerprint)
@@ -33,13 +37,39 @@ export function useNotificationEngine() {
     const dayOfMonth = today.getDate();
     const existingTitles = new Set(notifications.filter(n => n.createdAt > new Date(today.getFullYear(), today.getMonth(), 1).toISOString()).map(n => n.title));
 
-    const addNotification = (type: AppNotification['type'], title: string, message: string, icon?: string, color?: string) => {
+    const addNotification = (
+      type: AppNotification['type'],
+      title: string,
+      message: string,
+      icon?: string,
+      color?: string,
+      href?: string
+    ) => {
       if (existingTitles.has(title)) return;
       existingTitles.add(title);
       dispatch({
         type: 'ADD_NOTIFICATION',
-        payload: { type, title, message, icon, color, read: false },
+        payload: { type, title, message, icon, color, href, read: false },
       });
+    };
+
+    const showBrowserNotification = (title: string, message: string, href?: string) => {
+      if (typeof window === 'undefined' || typeof Notification === 'undefined' || Notification.permission !== 'granted') {
+        return;
+      }
+
+      const notification = new Notification(title, {
+        body: message,
+        icon: '/icons/icon-192.svg',
+      });
+
+      if (href) {
+        notification.onclick = () => {
+          window.focus();
+          window.location.href = href;
+          notification.close();
+        };
+      }
     };
 
     // ── Budget-Warnungen ──
@@ -163,6 +193,34 @@ export function useNotificationEngine() {
         'AlertOctagon',
         '#ef4444'
       );
+    }
+
+    if (settings.notifications.monthlyReport) {
+      const readyMonth = shiftMonth(month, -1);
+      const reportSummary = calculateMonthSummary(readyMonth, incomes, fixedExpenses, debts, expenses);
+      const hasReportData = (
+        reportSummary.totalIncome > 0
+        || reportSummary.totalFixedExpenses > 0
+        || reportSummary.totalDebtPayments > 0
+        || reportSummary.totalVariableExpenses > 0
+        || workSessions.some((session) => session.date.slice(0, 7) === readyMonth)
+      );
+      const lastNotifiedMonth = localStorage.getItem(MONTHLY_REPORT_NOTIFICATION_KEY);
+      const title = `Monatsbericht ${getMonthDisplayName(readyMonth)} ist fertig`;
+
+      if (hasReportData && lastNotifiedMonth !== readyMonth) {
+        const message = `Vergleiche ${getMonthDisplayName(readyMonth)} mit ${getMonthDisplayName(shiftMonth(readyMonth, -1))} inklusive Kategorien, Vermögen, Schulden und Arbeitszeit.`;
+        addNotification(
+          'monthly-report',
+          title,
+          message,
+          'FileBarChart',
+          '#0f766e',
+          '/monthly-report'
+        );
+        showBrowserNotification(title, message, '/monthly-report');
+        localStorage.setItem(MONTHLY_REPORT_NOTIFICATION_KEY, readyMonth);
+      }
     }
 
     // Net worth snapshot (record once per month)

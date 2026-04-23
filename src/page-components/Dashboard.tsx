@@ -357,7 +357,16 @@ export function Dashboard() {
             })}
           </div>
         ) : (
-          <EmptyState icon="ShoppingBag" title="Noch keine Ausgaben" description="Sobald du Ausgaben erfasst, erscheint hier dein letzter Verlauf." />
+          <EmptyState
+            icon="ShoppingBag"
+            title="Noch keine Ausgaben"
+            description="Sobald du Ausgaben erfasst, erscheint hier dein letzter Verlauf."
+            helpText="Erfasse zuerst 2 bis 3 typische Ausgaben. Danach werden Verlauf, Budgetwarnungen und Kategorien sofort verständlicher."
+            action={{
+              label: 'Erste Ausgabe erfassen',
+              onClick: () => window.dispatchEvent(new CustomEvent('open-quick-capture', { detail: { type: 'expense' } })),
+            }}
+          />
         )}
       </Card>
     ),
@@ -390,7 +399,14 @@ export function Dashboard() {
             })}
           </div>
         ) : (
-          <EmptyState icon="PiggyBank" title="Noch keine Sparziele" description="Lege Sparziele an, damit dein Dashboard auch Fortschritt und Meilensteine zeigt." />
+          <EmptyState
+            icon="PiggyBank"
+            title="Noch keine Sparziele"
+            description="Lege Sparziele an, damit dein Dashboard auch Fortschritt und Meilensteine zeigt."
+            helpText="Schon ein kleines Ziel wie Notgroschen oder Urlaub macht deine Überschüsse greifbarer und hilft beim Priorisieren."
+            action={{ label: 'Sparziele öffnen', onClick: () => router.push('/savings') }}
+            secondaryAction={{ label: 'Setup-Assistent', onClick: () => window.dispatchEvent(new CustomEvent('open-onboarding')) }}
+          />
         )}
       </Card>
     ),
