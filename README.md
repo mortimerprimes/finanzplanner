@@ -1,3 +1,31 @@
+## Bank Sync Automation
+
+The app now supports two automated balance-sync paths in the Bank Sync screen:
+
+- Raiffeisenbank via GoCardless Bank Account Data (PSD2 / Open Banking)
+- Trade Republic via a secure webhook endpoint that accepts pushed balance snapshots
+
+Required environment variables:
+
+```bash
+GOCARDLESS_SECRET_ID=...
+GOCARDLESS_SECRET_KEY=...
+BANK_SYNC_CRON_SECRET=...
+```
+
+Relevant endpoints:
+
+- `GET /api/bank-sync/providers` returns provider availability
+- `GET /api/bank-sync/institutions?country=DE&query=raiffeisen` searches GoCardless institutions
+- `POST /api/bank-sync/gocardless/connect` creates a PSD2 connection and returns the bank authorization URL
+- `POST /api/bank-sync/sync` refreshes configured pull connections for the current user
+- `GET /api/bank-sync/cron` runs pull sync for all users when called with `Authorization: Bearer $BANK_SYNC_CRON_SECRET`
+- `POST /api/bank-sync/trade-republic/[connectionId]` accepts webhook pushes with `Authorization: Bearer <one-time-token>`
+
+Trade Republic note:
+
+There is no stable official PSD2/open-banking path here, so the app exposes a secure push endpoint instead. Generate the webhook in the UI, then let an external fetcher (server cron, GitHub Action, local scheduler) POST the current balance to the returned URL.
+
 # React + TypeScript + Vite
 
 This template provides a minimal setup to get React working in Vite with HMR and some ESLint rules.

@@ -337,13 +337,37 @@ export interface Settings {
 }
 
 // Bank Sync
-export type BankType = 'elba' | 'generic';
+export type BankType = 'elba' | 'generic' | 'gocardless' | 'tradeRepublic';
+
+export type BankConnectionProvider = 'manual-elba' | 'gocardless' | 'trade-republic-webhook';
+
+export type BankConnectionSyncMode = 'manual-file' | 'provider-pull' | 'provider-push';
+
+export type BankConnectionSyncTarget = 'balance' | 'transactions';
+
+export type BankConnectionStatus = 'draft' | 'pending' | 'active' | 'needsReauth' | 'error';
 
 export interface BankConnection {
   id: string;
   name: string;
   bankType: BankType;
+  provider?: BankConnectionProvider;
+  syncMode?: BankConnectionSyncMode;
+  providerStatus?: BankConnectionStatus;
   accountId?: string;
+  institutionId?: string;
+  institutionName?: string;
+  remoteAccountId?: string;
+  remoteAccountIds?: string[];
+  autoSyncEnabled?: boolean;
+  syncTargets?: BankConnectionSyncTarget[];
+  syncFrequency?: 'manual' | 'hourly' | 'daily';
+  requisitionId?: string;
+  callbackReference?: string;
+  lastBalance?: number;
+  lastBalanceCurrency?: string;
+  lastBalanceAt?: string;
+  lastSyncError?: string;
   lastSyncAt?: string;
   lastSyncCount?: number;
   createdAt: string;
@@ -357,6 +381,9 @@ export interface SyncSession {
   transactionCount: number;
   newCount: number;
   skippedCount: number;
+  source?: BankConnectionSyncMode;
+  status?: 'success' | 'warning' | 'error';
+  message?: string;
 }
 
 export interface FreelanceProject {

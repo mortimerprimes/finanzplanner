@@ -26,6 +26,10 @@ function userKey(userId: string, entity: string): string {
   return `user:${userId}:${entity}`;
 }
 
+function globalKey(entity: string): string {
+  return `global:${entity}`;
+}
+
 export async function getEntities<T>(userId: string, entity: EntityKey): Promise<T[]> {
   const data = await kv.get<T[]>(userKey(userId, entity));
   return data || [];
@@ -42,6 +46,38 @@ export async function getObject<T>(userId: string, key: string, defaultValue: T)
 
 export async function setObject<T>(userId: string, key: string, data: T): Promise<void> {
   await kv.set(userKey(userId, key), data);
+}
+
+export async function setPrivateBankConnectionData<T>(userId: string, connectionId: string, data: T): Promise<void> {
+  await Promise.all([
+    kv.set(userKey(userId, `bankConnectionSecret:${connectionId}`), data),
+    kv.set(globalKey(`bankConnectionOwner:${connectionId}`), userId),
+  ]);
+}
+
+export async function getPrivateBankConnectionData<T>(userId: string, connectionId: string): Promise<T | null> {
+  const data = await kv.get<T>(userKey(userId, `bankConnectionSecret:${connectionId}`));
+  return data || null;
+}
+
+export async function getPrivateBankConnectionDataByConnectionId<T>(connectionId: string): Promise<{ userId: string; data: T | null } | null> {
+  const userId = await kv.get<string>(globalKey(`bankConnectionOwner:${connectionId}`));
+  if (!userId) {
+    return null;
+  }
+
+  const data = await kv.get<T>(userKey(userId, `bankConnectionSecret:${connectionId}`));
+  return {
+    userId,
+    data: data || null,
+  };
+}
+
+export async function deletePrivateBankConnectionData(userId: string, connectionId: string): Promise<void> {
+  await Promise.all([
+    kv.del(userKey(userId, `bankConnectionSecret:${connectionId}`)),
+    kv.del(globalKey(`bankConnectionOwner:${connectionId}`)),
+  ]);
 }
 
 const defaultInvoiceProfile = {

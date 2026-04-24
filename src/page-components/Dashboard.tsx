@@ -271,7 +271,10 @@ export function Dashboard() {
                     ))}
                   </Pie>
                   <Tooltip
-                    formatter={(value: number | string | readonly (number | string)[] | undefined) => formatCurrency(Number(Array.isArray(value) ? value[0] : value || 0), settings)}
+                    formatter={(value, name, item) => [
+                      formatCurrency(Number(Array.isArray(value) ? value[0] : value || 0), settings),
+                      item.payload?.name || String(name || ''),
+                    ]}
                     contentStyle={tooltipStyle}
                     itemStyle={{ color: tooltipStyle.color }}
                     labelStyle={{ color: tooltipStyle.color }}
