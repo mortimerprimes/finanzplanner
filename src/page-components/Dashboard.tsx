@@ -160,47 +160,6 @@ export function Dashboard() {
     : primaryRisk
       ? `Achte auf ${getExpenseCategoryInfo(primaryRisk.category, settings).labelDe} – dort liegt das größte Limit-Risiko.`
       : 'Dein Monat ist stabil. Nutze Überschüsse für Sparziele oder schnellere Tilgung.';
-  const focusActions = accounts.length === 0
-    ? [
-        {
-          label: 'Setup öffnen',
-          icon: 'Sparkles',
-          variant: 'primary' as const,
-          onClick: () => window.dispatchEvent(new CustomEvent('open-onboarding')),
-        },
-        {
-          label: 'Konto anlegen',
-          icon: 'Landmark',
-          variant: 'secondary' as const,
-          onClick: () => router.push('/accounts'),
-        },
-        {
-          label: 'Einnahme erfassen',
-          icon: 'TrendingUp',
-          variant: 'secondary' as const,
-          onClick: () => router.push('/income'),
-        },
-      ]
-    : [
-        {
-          label: 'Ausgabe erfassen',
-          icon: 'Plus',
-          variant: 'primary' as const,
-          onClick: () => window.dispatchEvent(new CustomEvent('open-quick-capture', { detail: { type: 'expense' } })),
-        },
-        {
-          label: 'Budget prüfen',
-          icon: 'Target',
-          variant: 'secondary' as const,
-          onClick: () => router.push('/budget'),
-        },
-        {
-          label: 'Konten öffnen',
-          icon: 'Landmark',
-          variant: 'secondary' as const,
-          onClick: () => router.push('/accounts'),
-        },
-      ];
 
   const widgetSections: Record<string, ReactNode> = {
     summary: (
@@ -621,29 +580,17 @@ export function Dashboard() {
             <Badge color={isMonthClosed ? '#10b981' : '#f59e0b'}>{isMonthClosed ? 'Monat abgeschlossen' : 'Monatsabschluss offen'}</Badge>
           </>
         )}
-        actions={(
-          <>
-            {focusActions.map((action) => (
-              <Button key={action.label} variant={action.variant} icon={action.icon} onClick={action.onClick} className="w-full sm:min-w-[152px]">
-                {action.label}
-              </Button>
-            ))}
-          </>
-        )}
-        secondary={(
-          <div className="flex flex-wrap items-center gap-2">
-            <span className="rounded-full bg-slate-100 px-3 py-1.5 text-xs text-slate-500 dark:bg-gray-800 dark:text-gray-400">Die wichtigsten Schritte liegen oben, tiefere Analysen kommen erst darunter.</span>
-            {advancedWidgetIds.length > 0 && (
-              <button
-                type="button"
-                onClick={() => setShowAdvancedInsights((current) => !current)}
-                className="rounded-full border border-slate-200 px-3 py-1.5 text-xs font-medium text-slate-600 transition-colors hover:border-slate-300 hover:bg-slate-50 dark:border-gray-700 dark:text-gray-300 dark:hover:border-gray-600 dark:hover:bg-gray-800"
-              >
-                {advancedInsightsOpen ? 'Erweiterte Einblicke ausblenden' : 'Erweiterte Einblicke einblenden'}
-              </button>
-            )}
+        secondary={advancedWidgetIds.length > 0 ? (
+          <div className="flex flex-wrap items-center justify-end gap-2">
+            <button
+              type="button"
+              onClick={() => setShowAdvancedInsights((current) => !current)}
+              className="rounded-full border border-slate-200 px-3 py-1.5 text-xs font-medium text-slate-600 transition-colors hover:border-slate-300 hover:bg-slate-50 dark:border-gray-700 dark:text-gray-300 dark:hover:border-gray-600 dark:hover:bg-gray-800"
+            >
+              {advancedInsightsOpen ? 'Erweiterte Einblicke ausblenden' : 'Erweiterte Einblicke einblenden'}
+            </button>
           </div>
-        )}
+        ) : undefined}
       />
 
       <Card className="overflow-hidden border-0 bg-gradient-to-br from-slate-950 via-slate-900 to-blue-900 text-white shadow-2xl shadow-slate-900/20">

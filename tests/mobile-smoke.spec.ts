@@ -48,6 +48,9 @@ test.describe('mobile smoke audit', () => {
 
     await expect(page.getByRole('main').getByRole('heading', { name: 'Dashboard' })).toBeVisible();
     await expect(page.getByText('Aktueller Kontostand')).toBeVisible();
+    await expect(page.getByRole('button', { name: /Ausgabe erfassen/i })).toHaveCount(0);
+    await expect(page.getByRole('button', { name: /Budget prüfen/i })).toHaveCount(0);
+    await expect(page.getByRole('button', { name: /Konten öffnen/i })).toHaveCount(0);
     await expectNoHorizontalOverflow(page);
   });
 
